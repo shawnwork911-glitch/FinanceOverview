@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Saxon Finance Dashboard</title>
+<script src="https://unpkg.com/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<style>
+  :root { --ink:#16202b; --sub:#5c6b7a; --line:#dde3ea; --paper:#f7f9fb; --panel:#fff; --accent:#1f4e79; --accent-light:#eaf0f7;
+    --good:#1e7a4c; --warn:#a56b12; --warn-bg:#fdf1e0; --bad:#a3312a; --gold:#b8862f; }
+  :root[data-theme="dark"] { --ink:#e7ecf2; --sub:#96a6b6; --line:#2b3542; --paper:#0e141b; --panel:#161e28; --accent:#4a8fc7; --accent-light:#1c2836;
+    --good:#2f9e68; --warn:#cf9433; --warn-bg:#332508; --bad:#d9534f; --gold:#c79a42; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 "Segoe UI","Helvetica Neue",Arial,sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:12px 28px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  h1 { font-size:18px; margin:0; } h2 { font-size:16px; margin:0; }
+  .muted { color:var(--sub); } .small { font-size:12.5px; }
+  .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  select, input, button { font:inherit; font-size:13px; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); }
+  input { width:90px; } button { cursor:pointer; }
+  .wrap { max-width:1180px; margin:0 auto; padding:20px 28px 60px; }
+  .badge { font-size:11px; font-weight:700; text-transform:uppercase; padding:3px 8px; border-radius:10px; background:var(--warn-bg); color:var(--warn); }
+  .note { font-size:12.5px; padding:9px 12px; border-radius:6px; margin-bottom:10px; background:var(--warn-bg); color:var(--warn); border:1px solid var(--warn); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:16px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .kpi .l { font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--sub); }
+  .kpi .v { font-size:21px; font-weight:700; margin-top:4px; } .kpi .s { font-size:11.5px; color:var(--sub); }
+  .kpi.warn .v { color:var(--warn); } .kpi.bad .v { color:var(--bad); }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tab { border:none; border-bottom:3px solid transparent; border-radius:0; background:none; font-weight:600; color:var(--sub); padding:10px 14px; }
+  .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab:disabled { opacity:.45; cursor:not-allowed; }
+  .pane { display:none; } .pane.active { display:block; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--line); }
+  th { font-size:11.5px; text-transform:uppercase; color:var(--sub); } .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  tr.sub td { font-weight:700; background:var(--accent-light); }
+  .seg { display:flex; height:24px; border-radius:5px; overflow:hidden; border:1px solid var(--line); background:var(--paper); margin:6px 0 10px; }
+  .seg span { height:100%; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 22px; font-size:12.5px; margin-bottom:16px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; }
+  .bar { display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:12.5px; }
+  .bar .t { flex:1; background:var(--paper); border-radius:4px; } .bar .f { height:20px; border-radius:4px; background:var(--accent); }
+  .bar b { width:130px; } .bar span { width:150px; text-align:right; }
+  .note.ok { background:var(--accent-light); color:var(--good); border-color:var(--good); }
+  h3.sec { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--sub); margin:18px 0 8px; }
+  form[data-f] { display:flex; flex-wrap:wrap; gap:8px; } td button { padding:3px 8px; font-size:12px; }
+  .etabs { display:flex; background:var(--accent); padding:0 28px; } .etabs button { border:none; border-radius:0; background:none; color:#fff; opacity:.75; font-weight:700; font-size:14px; padding:10px 22px; }
+  .etabs button.active { opacity:1; background:var(--paper); color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="etabs" id="etabs"><button data-e="MY">MY entity · MYR</button><button data-e="SG">SG entity · SGD</button></div>
+<header>
+  <div><h1>Saxon Finance Dashboard</h1><div class="muted small" id="asof">Loading…</div></div>
+  <div class="tools">
+    <span class="badge" id="demo" style="display:none;">Sample data</span>
+    <button id="reload">Reload</button><button id="theme">Dark</button>
+  </div>
+</header>
+<div class="wrap">
+  <div id="warn"></div>
+  <div class="tabs" id="tabs">
+    <button class="tab" data-p="cash">Cash</button><button class="tab" data-p="ar">Receivables</button><button class="tab" data-p="ap">Payables</button>
+    <button class="tab" data-p="ox">P&amp;L / OPEX</button><button class="tab" data-p="fc">13-week forecast</button>
+    <button class="tab" data-p="inv">Inventory</button><button class="tab" data-p="tr">Trade commitments</button>
+    <button class="tab active" data-p="sum">Summary</button>
+  </div>
+  <div class="pane" id="p-cash"></div><div class="pane" id="p-ar"></div><div class="pane" id="p-ap"></div><div class="pane" id="p-ox"></div><div class="pane" id="p-fc"></div>
+  <div class="pane" id="p-inv"></div><div class="pane" id="p-tr"></div><div class="pane active" id="p-sum"></div>
+</div>
+<script>
+/* ============ CONFIG ============ */
+const CONFIG = {
+  demo: true,                                   // true = built-in sample snapshot; set false to read the real file from SharePoint
+  tenantId: "ab7c8c1e-dc1d-431f-ba8b-e4de2b047f8b",
+  clientId: "15ab80ca-fab7-4755-9f9b-5275c47dec90",   // "Finance AP Request" app registration (add this page's URL as a redirect URI)
+  siteHost: "saxonrenewables.sharepoint.com", sitePath: "/sites/Operations",
+  library: "Finance Dashboard",
+  filePath: "dashboard-snapshot.json",
+  staleMinutes: 30
+};
+CONFIG.agedInLcy = false;   // set true if BC's aged AR/AP amounts are already in local currency (then currency only labels the row)
+const ENTITIES = [{ key:'SG', ccy:'SGD', re:/pte|singapore|\bsg\b/i }, { key:'MY', ccy:'MYR', re:/sdn|bhd|malaysia|\bmy\b/i }];
+const BUCKETS = ['Current','1–30 days','31–60 days','61+ days'], COLORS = ['var(--good)','var(--gold)','var(--warn)','var(--bad)'];
+
+/* ---- Sample snapshot: same shape the Power Automate flow writes ---- */
+const aged = (k, rows) => rows.map(r => ({ [k+'Number']: r[0], name: r[1], balanceDue: r[2]+r[3]+r[4]+r[5], currentAmount: r[2], period1Amount: r[3], period2Amount: r[4], period3Amount: r[5], currencyCode: r[6] || '' }));
+const SAMPLE = { generatedAt: new Date(Date.now() - 6*60000).toISOString(), intervalMinutes: 15, companies: [
+ { id:'1', name:'Saxon Renewables Pte Ltd', displayName:'Saxon Renewables Pte Ltd',
+   accounts:[{number:'10100',displayName:'DBS Bank SGD',category:'Assets',subCategory:'Cash',accountType:'Posting',balance:1284500},{number:'10110',displayName:'OCBC Bank USD',category:'Assets',subCategory:'Cash',accountType:'Posting',currencyCode:'USD',balance:480000},{number:'10120',displayName:'Standard Chartered EUR',category:'Assets',subCategory:'Cash',accountType:'Posting',currencyCode:'EUR',balance:85000},{number:'11000',displayName:'Inventory',category:'Assets',accountType:'Posting',balance:900000},{number:'20000',displayName:'Trade payables',category:'Liabilities',accountType:'Posting',balance:-500000}],
+   agedAR: aged('customer',[['C001','Helios Energy',420000,180000,60000,0],['C002','Nordic Solar AS',120000,40000,0,20000,'USD'],['C003','Greenline Trading',150000,0,70000,120000],['C004','Orion Power',98000,22000,0,0],['C005','Pacific Biofuels',60000,0,0,0]]),
+   agedAP: aged('vendor',[['V001','Sunrise Supply',380000,120000,40000,0],['V002','Delta Logistics',140000,60000,0,0],['V003','Terra Certificates',90000,0,25000,10000,'USD'],['V004','Apex Shipping',75000,25000,0,0]]) },
+ { id:'2', name:'Saxon Renewables Sdn Bhd', displayName:'Saxon Renewables Sdn Bhd',
+   accounts:[{number:'1000',displayName:'Maybank Current',category:'Assets',subCategory:'Cash',accountType:'Posting',balance:2150000},{number:'1010',displayName:'CIMB Bank',category:'Assets',subCategory:'Cash',accountType:'Posting',balance:830000},{number:'1020',displayName:'CIMB USD',category:'Assets',subCategory:'Cash',accountType:'Posting',currencyCode:'USD',balance:150000},{number:'1030',displayName:'Maybank SGD',category:'Assets',subCategory:'Cash',accountType:'Posting',currencyCode:'SGD',balance:200000},{number:'1500',displayName:'Inventory',category:'Assets',accountType:'Posting',balance:1700000}],
+   agedAR: aged('customer',[['M001','Borneo Biomass',900000,300000,150000,80000],['M002','Perak Energy',450000,0,200000,0],['M003','KL Green Fuel',60000,15000,0,0,'SGD'],['M004','Johor Power',130000,0,0,95000]]),
+   agedAP: aged('vendor',[['MV01','Plantation Supply',700000,250000,90000,0],['MV02','Port Klang Freight',50000,10000,0,0,'USD'],['MV03','Eco Haulage',95000,0,30000,20000]]) }
+]};
+
+/* ---- State and helpers ---- */
+const S = { cos: [], snap: null, entity: 'SG', pane: 'sum' };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pref = (k, d) => { try { const v = localStorage.getItem('fdash-' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
+const setPref = (k, v) => { try { localStorage.setItem('fdash-' + k, JSON.stringify(v)); } catch (e) {} };
+S.entity = pref('entity', 'SG');
+const fmt = (n, c, d) => n == null || isNaN(n) ? '—' : (c ? c + ' ' : '') + Number(n).toLocaleString('en-SG', { minimumFractionDigits: d||0, maximumFractionDigits: d||0 });
+const ccy = () => S.entity === 'ALL' ? $('rep').value : ENTITIES.find(e => e.key === S.entity).ccy;
+function conv(co, v){ const to = ccy(); if (co.ccy === to) return v; const fx = Number($('fx').value) || 0; return fx ? (co.ccy === 'SGD' ? v*fx : v/fx) : null; }
+const scope = () => S.cos.filter(c => c.entity && (S.entity === 'ALL' || c.entity === S.entity));
+function sum(get){ let v = 0, miss = false; scope().forEach(c => { const x = get(c); const y = x == null ? null : conv(c, x); if (y == null) miss = true; else v += y; }); return { v, miss }; }
+
+/* ---- Turn the raw snapshot into cash / AR / AP per company ---- */
+function cashOf(accts, base){
+  const posting = accts.filter(a => (a.accountType || 'Posting') === 'Posting');
+  const assets = posting.some(a => a.category) ? posting.filter(a => /asset/i.test(a.category || '')) : posting;
+  const rows = assets.filter(a => /cash|bank/i.test((a.subCategory||'') + ' ' + (a.displayName||''))).map(a => {
+    const k = ['balance','totalBalance','netChange'].find(f => a[f] != null);
+    return { number: a.number, name: a.displayName, cur: a.currencyCode || base, balance: k ? Number(a[k]) : 0 };
+  });
+  return { rows, total: rows.reduce((s, r) => s + r.balance, 0) };
+}
+function agingOf(raw, ap, base){
+  let rows = (raw || []).map(r => { const b = [r.currentAmount, r.period1Amount, r.period2Amount, r.period3Amount].map(x => Number(x||0));
+    return { name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => r.total || r.b.some(Boolean));
+  if (ap && rows.reduce((s, r) => s + r.total, 0) < 0) rows = rows.map(r => ({ ...r, total: -r.total, b: r.b.map(x => -x) }));
+  return { rows: rows.sort((x, y) => y.total - x.total), b: [0,1,2,3].map(i => rows.reduce((s, r) => s + r.b[i], 0)), total: rows.reduce((s, r) => s + r.total, 0) };
+}
+function build(snap){
+  const map = pref('map', {});
+  return snap.companies.map(c => {
+    const g = ENTITIES.find(e => e.re.test(c.name + ' ' + (c.displayName || ''))), key = map[c.id] ?? (g ? g.key : ''), ec = (ENTITIES.find(e => e.key === key) || {}).ccy || '';
+    return { id: c.id, display: c.displayName || c.name, entity: key, ccy: (ENTITIES.find(e => e.key === key) || {}).ccy || '',
+      rc: cashOf(c.accounts || [], ec).rows, rr: { ar: agingOf(c.agedAR, false, ec).rows, ap: agingOf(c.agedAP, true, ec).rows }, cash: { rows: [], total: 0 }, inv: invOf(c.accounts || []), ox: opexOf(opexRows(c)), hasOx: opexRows(c).length > 0, due: (c.apDue || []).length ? c.apDue : null,
+      pre: preRows(c).map(p => ({ party: p.vendor || p.name || '', ref: p.reference || '', note: p.description || '', date: p.date, amt: Number(p.amount || 0), src: 'BC' })), ar: null, ap: null };
+  });
+}
+
+/* ---- Loading: sample or SharePoint ---- */
+async function loadLive(){
+  const msalApp = new msal.PublicClientApplication({ auth: { clientId: CONFIG.clientId, authority: 'https://login.microsoftonline.com/' + CONFIG.tenantId, redirectUri: location.origin + location.pathname }, cache: { cacheLocation: 'sessionStorage' } });
+  await msalApp.initialize();
+  const scopes = ['Sites.Read.All'];
+  let acc = msalApp.getAllAccounts()[0] || (await msalApp.loginPopup({ scopes })).account;
+  const token = (await msalApp.acquireTokenSilent({ scopes, account: acc }).catch(() => msalApp.acquireTokenPopup({ scopes }))).accessToken;
+  const g = async u => { const r = await fetch('https://graph.microsoft.com/v1.0' + u, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Graph ' + r.status); return r.json(); };
+  const site = await g('/sites/' + CONFIG.siteHost + ':' + CONFIG.sitePath);
+  const drive = (await g('/sites/' + site.id + '/drives')).value.find(d => d.name === CONFIG.library);
+  if (!drive) throw new Error('Library "' + CONFIG.library + '" not found or not visible to you.');
+  return g('/drives/' + drive.id + '/root:/' + CONFIG.filePath + ':/content');
+}
+async function load(){
+  $('asof').textContent = 'Loading…';
+  try {
+    S.snap = CONFIG.demo ? SAMPLE : await loadLive();
+    S.cos = build(S.snap);
+    $('demo').style.display = CONFIG.demo ? '' : 'none';
+    render();
+  } catch (e) { $('asof').textContent = 'Could not load the snapshot: ' + e.message; }
+}
+
+/* ---- Rendering ---- */
+function kpi(l, r, sub, cls){ return '<div class="kpi ' + (cls||'') + '"><div class="l">' + l + '</div><div class="v">' + (r.miss ? '—' : fmt(r.v, ccy())) + '</div><div class="s">' + (r.miss ? 'Needs FX rate' : sub) + '</div></div>'; }
+function render(){
+  applyFx();
+  const t = new Date(S.snap.generatedAt), age = Math.round((Date.now() - t) / 60000);
+  $('asof').textContent = 'Data as of ' + t.toLocaleString('en-SG') + ' (' + age + ' min ago)';
+  const warns = [];
+  if (age > CONFIG.staleMinutes) warns.push('The snapshot is ' + age + ' minutes old — the BC sync may have stopped. Check the Power Automate flow.');
+  const ms = [...new Set(scope().flatMap(c => c.miss))]; if (ms.length) warns.push('Enter the exchange rate for ' + ms.join(', ') + ' (Cash / Receivables / Payables tabs). Until then those balances are left out of the totals.');
+  $('warn').innerHTML = warns.map(w => '<div class="note">' + esc(w) + '</div>').join('');
+  const cash = sum(c => c.cash.total), ar = sum(c => c.ar.total), arC = sum(c => c.ar.b[0]), ap = sum(c => c.ap.total), apC = sum(c => c.ap.b[0]);
+  const arO = { v: ar.v - arC.v, miss: ar.miss || arC.miss }, apO = { v: ap.v - apC.v, miss: ap.miss || apC.miss };
+  const pct = (a, b) => b.v ? Math.round(a.v / b.v * 100) + '% of total' : '';
+  const K = { cash: kpi('Available cash', cash, S.entity === 'ALL' ? 'All entities' : S.entity), ar: kpi('Receivables', ar, 'Outstanding'), arO: kpi('AR overdue', arO, pct(arO, ar), arO.v > 0 ? 'warn' : ''),
+    ap: kpi('Payables', ap, 'Outstanding'), apO: kpi('AP overdue', apO, pct(apO, ap), apO.v > 0 ? 'bad' : ''), liq: kpi('Cash + AR − AP', { v: cash.v + ar.v - ap.v, miss: cash.miss || ar.miss || ap.miss }, 'Quick liquidity view'), _apO: apO.v };
+  cashPane(cash); agingPane('ar', 'Receivables', 'Customer'); agingPane('ap', 'Payables', 'Vendor'); extra(K, cash, ar, ap);
+}
+function cashPane(total){
+  let h = '<div class="card"><div class="head"><h2>Cash accounts</h2><span class="muted small">Account currency · ≈ ' + ccy() + '</span></div><table><thead><tr><th>Account</th><th>Ccy</th><th class="num">Balance</th><th class="num">≈ ' + ccy() + '</th></tr></thead><tbody>';
+  scope().forEach(c => c.cash.rows.forEach(a => h += '<tr><td>' + esc(a.number + ' · ' + a.name) + '</td><td>' + a.cur + '</td><td class="num">' + fmt(a.balance, '', 2) + '</td><td class="num">' + (a.cur === c.ccy || IN.fxr[c.entity + ':' + a.cur] ? fmt(a.base, '', 2) : '—') + '</td></tr>'));
+  $('p-cash').innerHTML = h + '<tr class="sub"><td colspan="3">Total (' + ccy() + ')</td><td class="num">' + fmt(total.v, '', 2) + '</td></tr></tbody></table></div>';
+}
+function agingPane(k, name, party){
+  const b = [0,1,2,3].map(i => sum(c => c[k].b[i]));
+  if (b.some(x => x.miss)) { $('p-' + k).innerHTML = '<div class="card muted">Enter the FX rate to consolidate.</div>'; return; }
+  const T = b.reduce((s, x) => s + Math.max(x.v, 0), 0) || 1, rows = [];
+  scope().forEach(c => c[k].rows.forEach(r => rows.push({ e: c.entity, n: r.name + (r.cur !== c.ccy ? ' · ' + r.cur : ''), t: conv(c, r.total), b: r.b.map(x => conv(c, x)) })));
+  rows.sort((x, y) => y.t - x.t);
+  $('p-' + k).innerHTML = '<div class="card"><div class="head"><h2>' + name + ' aging</h2><span class="muted small">Total ' + fmt(b.reduce((s, x) => s + x.v, 0), ccy()) + '</span></div><div class="seg">' +
+    b.map((x, i) => '<span style="width:' + Math.max(x.v, 0)/T*100 + '%;background:' + COLORS[i] + '" title="' + BUCKETS[i] + '"></span>').join('') + '</div><div class="legend">' +
+    b.map((x, i) => '<span><i style="background:' + COLORS[i] + '"></i>' + BUCKETS[i] + ' <b>' + fmt(x.v, ccy()) + '</b> (' + Math.round(Math.max(x.v, 0)/T*100) + '%)</span>').join('') + '</div>' +
+    '<table><thead><tr><th>' + party + '</th><th>Entity</th><th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' +
+    rows.slice(0, 15).map(r => '<tr><td>' + esc(r.n) + '</td><td>' + r.e + '</td><td class="num">' + fmt(r.t, '', 0) + '</td>' + r.b.map(x => '<td class="num">' + fmt(x, '', 0) + '</td>').join('') + '</tr>').join('') +
+    '</tbody></table><div class="muted small" style="margin-top:8px;">Top 15 of ' + rows.length + ', in ' + ccy() + '.</div></div>';
+}
+
+/* ============ MULTI-CURRENCY: balances kept in their own currency, FX rate per entity (finance input) ============ */
+const DEMO_RATES = { 'SG:USD': 1.34, 'SG:EUR': 1.46, 'SG:MYR': .30, 'MY:USD': 4.45, 'MY:SGD': 3.3, 'MY:EUR': 4.85 };
+const agg = rows => ({ rows: [...rows].sort((x, y) => y.total - x.total), b: [0, 1, 2, 3].map(i => rows.reduce((s, r) => s + r.b[i], 0)), total: rows.reduce((s, r) => s + r.total, 0) });
+function applyFx(){ S.cos.forEach(c => { if (!c.entity) return; const miss = new Set(), cu = { cash: {}, ar: {}, ap: {} };
+  const bc = (u, v) => { if (u === c.ccy) return v; const x = IN.fxr[c.entity + ':' + u]; if (!x) { miss.add(u); return 0; } return v * x; };
+  const add = (k, u, amt, base) => { const o = cu[k][u] || (cu[k][u] = { amt: 0, base: 0 }); o.amt += amt; o.base += base; };
+  const rows = c.rc.map(a => { const v = bc(a.cur, a.balance); add('cash', a.cur, a.balance, v); return { ...a, base: v }; });
+  c.cash = { rows, total: rows.reduce((s, a) => s + a.base, 0) };
+  ['ar', 'ap'].forEach(k => { c[k] = agg(c.rr[k].map(x => { const o = { ...x, total: bc(x.cur, x.total), b: x.b.map(v => bc(x.cur, v)) }; add(k, x.cur, x.total, o.total); return o; })); });
+  c.cur = cu; c.miss = [...miss]; }); }
+function curCard(k, title){
+  const b = ccy(), g = {}; scope().forEach(c => Object.entries(c.cur[k]).forEach(([u, x]) => { const a = g[u] || (g[u] = { amt: 0, base: 0 }); a.amt += x.amt; a.base += x.base; }));
+  const order = [...new Set([b, 'USD', b === 'MYR' ? 'SGD' : null, ...Object.keys(g).sort()].filter(Boolean))]; let tot = 0;
+  const rows = order.map(u => { const a = g[u] || { amt: 0, base: 0 }, r = IN.fxr[S.entity + ':' + u]; tot += a.base;
+    return '<tr><td><b>' + u + '</b>' + (u === b ? ' <span class="muted small">base</span>' : '') + '</td><td class="num">' + fmt(a.amt, '', 0) + '</td><td>' + (u === b ? '<span class="muted">—</span>' : '<span class="muted small">1 ' + u + ' =</span> <input type="number" step="0.0001" min="0" data-fxr="' + S.entity + ':' + u + '" value="' + (r || '') + '" style="width:90px"> <span class="muted small">' + b + '</span>') + '</td><td class="num">' + (u === b ? fmt(a.amt) : a.amt ? (r ? '≈ ' + fmt(a.base) : '<span class="muted">Enter rate</span>') : '—') + '</td></tr>'; }).join('');
+  return card(title, '<table><thead><tr><th>Currency</th><th class="num">Amount</th><th>Exchange rate</th><th class="num">≈ ' + b + '</th></tr></thead><tbody>' + rows + '<tr class="sub"><td colspan="3">Total in ' + b + '</td><td class="num">' + fmt(tot) + '</td></tr></tbody></table>', 'Rates are finance inputs, saved in this browser');
+}
+/* ============ PHASE 2: OPEX · 13-week forecast · Inventory · Trade commitments · Summary ============ */
+CONFIG.spreadWeeks = 8;   // used only when the snapshot has no apDue list: current (not yet due) AP is spread over this many weeks
+const PAL = ['#4a8fc7','#2f9e68','#c79a42','#d9534f','#8e6bbf','#3bb3b3','#c76b9b','#7f8c9a'];
+const IN = { adj: pref('adj', []), fix: pref('fix', {}), fc: pref('fc', []), tr: pref('tr', []), tmin: pref('tmin', 100000), fxr: pref('fxr', CONFIG.demo ? DEMO_RATES : {}) };   // finance manual inputs (this browser)
+const sv = k => setPref(k, IN[k]);
+const cv = (f, v) => conv({ ccy: f }, v), eccy = k => ENTITIES.find(e => e.key === k).ccy, inScope = k => S.entity === 'ALL' || S.entity === k;
+const needFx = () => S.entity === 'ALL' && new Set(scope().map(c => c.ccy)).size > 1 && !Number($('fx').value);
+const mk = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), ymd = d => mk(d) + '-' + String(d.getDate()).padStart(2, '0');
+const lastM = n => Array.from({ length: n }, (_, i) => { const d = new Date(); return mk(new Date(d.getFullYear(), d.getMonth() - n + i, 1)); });
+const ml = k => new Date(+k.slice(0, 4), +k.slice(5) - 1, 1).toLocaleString('en-SG', { month: 'short', year: '2-digit' });
+const dt = s => new Date(s + 'T00:00:00'), ago = n => { const d = new Date(); d.setDate(d.getDate() - n); return ymd(d); };
+const kf = n => { const a = Math.abs(n); return (n < 0 ? '-' : '') + (a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? Math.round(a / 1e3) + 'k' : Math.round(a)); };
+const kv = (l, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><div class="l">' + l + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>';
+const row = (...a) => '<div class="kpis">' + a.join('') + '</div>', card = (t, b, r) => '<div class="card"><div class="head"><h2>' + t + '</h2><span class="muted small">' + (r || '') + '</span></div>' + b + '</div>';
+let ents = '';
+
+/* sample feeds (same shape the Power Automate flow should add to the snapshot) */
+const genOx = b => lastM(6).flatMap((m, i) => Object.entries(b).map(([n, a], j) => ({ month: m, category: n, amount: Math.round(a * (1 + .07 * Math.sin(i * 2.1 + j)) / 100) * 100 })));
+SAMPLE.companies[0].opex = genOx({ Payroll: 185000, Rent: 42000, Utilities: 9000, Insurance: 12000, 'Professional fees': 18000, Travel: 14000, Marketing: 11000 });
+SAMPLE.companies[1].opex = genOx({ Payroll: 420000, Rent: 95000, Utilities: 38000, Insurance: 22000, 'Logistics admin': 60000, Travel: 30000, 'Professional fees': 40000 });
+SAMPLE.companies[0].prepayments = [{ vendor: 'Sunrise Supply', reference: 'PO-SG-1042', description: 'Biomass pellets – Q1 cargo', date: ago(38), amount: 450000 }, { vendor: 'Terra Certificates', reference: 'PO-SG-1051', description: 'REC forward purchase', date: ago(21), amount: 180000 }, { vendor: 'Apex Shipping', reference: 'PO-SG-1060', description: 'Freight deposit', date: ago(9), amount: 40000 }];
+SAMPLE.companies[1].prepayments = [{ vendor: 'Plantation Supply', reference: 'PO-MY-2210', description: 'Palm kernel shell – 3 shipments', date: ago(52), amount: 1250000 }, { vendor: 'Port Klang Freight', reference: 'PO-MY-2234', description: 'Port handling deposit', date: ago(15), amount: 210000 }, { vendor: 'Eco Haulage', reference: 'PO-MY-2240', description: 'Haulage deposit', date: ago(6), amount: 35000 }];
+
+/* ---- BC data per company ---- */
+const nameMap = c => { const m = {}; (c.accounts || []).forEach(a => m[a.number] = a.displayName); return m; };
+function opexRows(c){ if ((c.opex || []).length) return c.opex; const nm = nameMap(c); return (c.glExpense || []).map(g => ({ month: g.m, category: nm[g.a] || g.a, amount: Number(g.v || 0) })); }
+function preRows(c){ if ((c.prepayments || []).length) return c.prepayments; const nm = nameMap(c), g = {};
+  (c.glPrepay || []).forEach(r => { const k = r.d || r.desc, dte = String(r.date).slice(0, 10), x = g[k] || (g[k] = { reference: r.d || '', vendor: r.desc || nm[r.a] || '', description: nm[r.a] || '', date: dte, amount: 0 }); x.amount += Number(r.v || 0); if (dte < x.date) x.date = dte; });
+  return Object.values(g).filter(x => x.amount > 0.5); }
+const invOf = a => { const rows = a.filter(x => (x.accountType || 'Posting') === 'Posting' && /asset/i.test(x.category || 'Assets') && /inventor/i.test((x.subCategory || '') + ' ' + (x.displayName || ''))).map(x => ({ number: x.number, name: x.displayName, balance: Number(x.balance ?? x.totalBalance ?? 0) })); return { rows, total: rows.reduce((s, r) => s + r.balance, 0) }; };
+const opexOf = rows => { const o = {}; rows.forEach(r => { const n = r.category || r.name || 'Other'; o[n] = o[n] || {}; o[n][r.month] = (o[n][r.month] || 0) + Number(r.amount || 0); }); return o; };
+const isFix = n => n in IN.fix ? IN.fix[n] : /payroll|salar|rent|lease|insur|utilit|deprec|subscri|audit/i.test(n);
+
+/* ---- calculations ---- */
+function calcOx(){
+  const ms = lastM(6), names = new Set(); scope().forEach(c => Object.keys(c.ox).forEach(n => names.add(n))); IN.adj.forEach(a => inScope(a.ent) && names.add(a.cat));
+  const cats = [...names].sort().map(n => { const vals = ms.map(m => scope().reduce((s, c) => s + cv(c.ccy, (c.ox[n] || {})[m] || 0), 0) + IN.adj.filter(a => a.cat === n && a.month === m && inScope(a.ent)).reduce((s, a) => s + cv(eccy(a.ent), a.amt), 0)); return { n, vals, fixed: isFix(n), t: vals.reduce((a, b) => a + b, 0) }; });
+  return { ms, cats, tot: ms.map((_, i) => cats.reduce((s, c) => s + c.vals[i], 0)) };
+}
+function calcFc(){
+  const ox = calcOx(), fm = ox.cats.filter(c => c.fixed).reduce((s, c) => s + c.vals.slice(-3).reduce((a, b) => a + b, 0) / 3, 0), fw = fm * 12 / 52;
+  const d0 = new Date(); d0.setHours(0, 0, 0, 0); d0.setDate(d0.getDate() - (d0.getDay() + 6) % 7);
+  const W = Array.from({ length: 13 }, (_, i) => { const d = new Date(d0); d.setDate(d.getDate() + 7 * i); return { d, fix: fw, pay: 0, adj: 0 }; });
+  const put = (k, v, s) => { let i = Math.floor((dt(s) - d0) / 6048e5); if (i < 0) i = 0; if (i < 13) W[i][k] += v; };
+  scope().forEach(c => { if (c.due) { const t = c.due.reduce((q, x) => q + (+x.amount || 0), 0), f = t > 0 && c.ap.total > 0 ? c.ap.total / t : 1; c.due.forEach(x => put('pay', cv(c.ccy, +x.amount * f), String(x.dueDate).slice(0, 10))); } else { const b = c.ap.b, n = CONFIG.spreadWeeks; W[0].pay += cv(c.ccy, b[1] + b[2] + b[3]); for (let i = 0; i < n; i++) W[i].pay += cv(c.ccy, b[0]) / n; } });
+  IN.fc.filter(x => inScope(x.ent)).forEach(x => put('adj', cv(eccy(x.ent), x.amt), x.date));
+  const open = sum(c => c.cash.total).v; let run = open; W.forEach(w => { run += -w.fix - w.pay + w.adj; w.cl = run; });
+  const lo = W.reduce((m, w, i) => w.cl < m.v ? { v: w.cl, i } : m, { v: Infinity, i: 0 });
+  return { W, open, fm, lo, ox };
+}
+function tradeItems(){ const a = []; scope().forEach(c => c.pre.forEach(p => a.push({ ...p, e: c.entity, cc: c.ccy }))); IN.tr.filter(x => inScope(x.ent)).forEach(x => a.push({ ...x, e: x.ent, cc: eccy(x.ent), src: 'Manual' })); a.forEach(x => x.r = cv(x.cc, x.amt)); return a.sort((x, y) => y.r - x.r); }
+
+/* ---- SVG charts ---- */
+function stacked(labs, ser){
+  const W = 900, H = 250, L = 64, R = 16, T = 14, B = 28, bw = (W - L - R) / labs.length, mx = Math.max(...labs.map((_, i) => ser.reduce((s, x) => s + Math.max(x.vals[i] || 0, 0), 0)), 1) * 1.08, y = v => T + (H - T - B) * (1 - v / mx);
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto">';
+  for (let g = 0; g <= 4; g++) { const v = mx * g / 4; s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--sub)">${kf(v)}</text>`; }
+  labs.forEach((lb, i) => { let a = 0; ser.forEach(x => { const v = Math.max(x.vals[i] || 0, 0); if (v) { s += `<rect x="${L + i * bw + bw * .18}" y="${y(a + v)}" width="${bw * .64}" height="${y(a) - y(a + v)}" fill="${x.color}"><title>${esc(x.name + ' · ' + lb + ': ' + fmt(v, ccy()))}</title></rect>`; a += v; } }); s += `<text x="${L + (i + .5) * bw}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--sub)">${esc(lb)}</text>`; });
+  return s + '</svg><div class="legend">' + ser.map(x => `<span><i style="background:${x.color}"></i>${esc(x.name)}</span>`).join('') + '</div>';
+}
+function line(vals, labs){
+  const W = 900, H = 250, L = 64, R = 16, T = 14, B = 28, lo = Math.min(0, ...vals), hi = Math.max(...vals, 1), x = i => L + (W - L - R) * i / (vals.length - 1), y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo || 1));
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto">';
+  for (let g = 0; g <= 4; g++) { const v = lo + (hi - lo) * g / 4; s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--sub)">${kf(v)}</text>`; }
+  s += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--bad)" stroke-dasharray="4 4"/><polyline fill="none" stroke="var(--accent)" stroke-width="2.5" points="${vals.map((v, i) => x(i) + ',' + y(v)).join(' ')}"/>`;
+  vals.forEach((v, i) => s += `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${v < 0 ? 'var(--bad)' : 'var(--accent)'}"><title>${esc(labs[i] + ': ' + fmt(v, ccy()))}</title></circle><text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--sub)">${labs[i]}</text>`);
+  return s + '</svg>';
+}
+
+/* ---- panes ---- */
+const fxMsg = '<div class="card muted">Enter the FX rate to consolidate.</div>';
+const dlabel = d => d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
+function extra(K, cash, ar, ap){
+  const P = id => $('p-' + id); ents = '<option>' + S.entity + '</option>';
+  P('cash').innerHTML = row(K.cash) + curCard('cash', 'Cash by currency') + P('cash').innerHTML; P('ar').innerHTML = row(K.ar, K.arO) + curCard('ar', 'Receivables by currency') + P('ar').innerHTML; P('ap').innerHTML = row(K.ap, K.apO) + curCard('ap', 'Payables by currency') + P('ap').innerHTML;
+  if (needFx()) { ['ox', 'fc', 'inv', 'tr', 'sum'].forEach(i => P(i).innerHTML = fxMsg); return; }
+  const c = ccy(), ox = calcOx(), fc = calcFc(), inv = sum(x => x.inv.total).v, items = tradeItems(), big = items.filter(x => x.r >= IN.tmin), bt = big.reduce((s, x) => s + x.r, 0), n = ox.ms.length - 1;
+  const avg = ox.tot.reduce((a, b) => a + b, 0) / ox.tot.length, end = fc.W[12];
+  K.ox = kv('OPEX last month', fmt(ox.tot[n], c), '6-mo avg ' + fmt(avg, c)); K.fix = kv('Monthly fixed costs', fmt(fc.fm, c), 'Avg of last 3 months');
+  K.fc = kv('Cash in 13 weeks', fmt(end.cl, c), 'w/c ' + dlabel(end.d), end.cl < 0 ? 'bad' : ''); K.lo = kv('Lowest projected cash', fmt(fc.lo.v, c), 'Week ' + (fc.lo.i + 1) + ' · w/c ' + dlabel(fc.W[fc.lo.i].d), fc.lo.v < 0 ? 'bad' : '');
+  K.inv = kv('Inventory (at cost)', fmt(inv, c), 'Balance sheet · BC'); K.tr = kv('Trade prepayments', fmt(bt, c), big.length + ' deals ≥ ' + fmt(IN.tmin, c)); K.lg = kv('Largest prepayment', big[0] ? fmt(big[0].r, c) : '—', big[0] ? esc(big[0].party) : 'None above threshold');
+  const feedMiss = scope().filter(x => !x.hasOx).map(x => x.entity);
+  /* OPEX */
+  const catOpts = ox.cats.map(x => '<option>' + esc(x.n) + '</option>').join('');
+  P('ox').innerHTML = row(K.ox, K.fix) + (feedMiss.length ? '<div class="note">No OPEX rows in the snapshot for ' + feedMiss.join(', ') + ' — add an <b>opex</b> array (month, category, amount) to the BC flow.</div>' : '') +
+    card('OPEX by month', stacked(ox.ms.map(ml), ox.cats.map((x, i) => ({ name: x.n, color: PAL[i % PAL.length], vals: x.vals }))), 'BC + finance adjustments · ' + c) +
+    card('OPEX by category', '<table><thead><tr><th>Category</th><th>Fixed?</th>' + ox.ms.map(m => '<th class="num">' + ml(m) + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
+      ox.cats.map(x => '<tr><td>' + esc(x.n) + '</td><td><input type="checkbox" style="width:auto" data-fix="' + esc(x.n) + '"' + (x.fixed ? ' checked' : '') + '></td>' + x.vals.map(v => '<td class="num">' + fmt(v) + '</td>').join('') + '<td class="num">' + fmt(x.t) + '</td></tr>').join('') +
+      '<tr class="sub"><td colspan="2">Total</td>' + ox.tot.map(v => '<td class="num">' + fmt(v) + '</td>').join('') + '<td class="num">' + fmt(ox.tot.reduce((a, b) => a + b, 0)) + '</td></tr></tbody></table><div class="muted small" style="margin-top:8px">Ticked categories count as fixed costs in the 13-week forecast.</div>') +
+    card('Finance adjustments', '<datalist id="cats">' + catOpts + '</datalist><form data-f="adj"><select name="ent">' + ents + '</select><select name="month">' + ox.ms.map(m => '<option value="' + m + '">' + ml(m) + '</option>').join('') + '</select><input name="cat" list="cats" placeholder="Category" required style="width:150px"><input name="amt" type="number" step="any" required placeholder="Amount (local ccy)" style="width:150px"><input name="note" placeholder="Note" style="width:200px"><button>Add</button></form>' +
+      mlist('adj', x => '<td>' + x.ent + '</td><td>' + ml(x.month) + '</td><td>' + esc(x.cat) + '</td><td class="num">' + fmt(x.amt, eccy(x.ent)) + '</td><td class="muted">' + esc(x.note || '') + '</td>'), 'Positive adds cost, negative reduces it');
+  /* 13-week forecast */
+  P('fc').innerHTML = row(K.fc, K.lo, K.fix) + '<div class="note">Projected cash = opening cash − monthly fixed costs (spread weekly) − AP payments due (overdue in week 1) ± finance adjustments. Customer receipts are <b>not</b> included; add expected ones below.</div>' +
+    card('Projected closing cash', line([fc.open, ...fc.W.map(w => w.cl)], ['Now', ...fc.W.map((_, i) => 'W' + (i + 1))]), c) +
+    card('Weekly cash out', stacked(fc.W.map((_, i) => 'W' + (i + 1)), [{ name: 'Fixed costs', color: 'var(--accent)', vals: fc.W.map(w => w.fix) }, { name: 'AP payments', color: 'var(--warn)', vals: fc.W.map(w => w.pay) }, { name: 'Other adjustments', color: 'var(--bad)', vals: fc.W.map(w => -w.adj) }])) +
+    card('Weekly detail', '<table><thead><tr><th>Week</th><th class="num">Fixed costs</th><th class="num">AP payments</th><th class="num">Adjustments</th><th class="num">Closing cash</th></tr></thead><tbody>' +
+      fc.W.map((w, i) => '<tr><td>W' + (i + 1) + ' · ' + dlabel(w.d) + '</td><td class="num">' + fmt(-w.fix) + '</td><td class="num">' + fmt(-w.pay) + '</td><td class="num">' + fmt(w.adj) + '</td><td class="num" style="' + (w.cl < 0 ? 'color:var(--bad);font-weight:700' : '') + '">' + fmt(w.cl) + '</td></tr>').join('') + '</tbody></table>', 'Opening cash ' + fmt(fc.open, c)) +
+    card('Finance adjustments', '<form data-f="fc"><select name="ent">' + ents + '</select><input name="date" type="date" required style="width:150px"><input name="note" placeholder="Description" required style="width:200px"><input name="amt" type="number" step="any" required placeholder="Amount (− out, + in)" style="width:170px"><button>Add</button></form>' +
+      mlist('fc', x => '<td>' + x.ent + '</td><td>' + x.date + '</td><td>' + esc(x.note) + '</td><td class="num">' + fmt(x.amt, eccy(x.ent)) + '</td>'), 'Local currency of the entity');
+  /* Inventory */
+  const mxi = Math.max(...scope().map(x => cv(x.ccy, x.inv.total) || 0), 1);
+  P('inv').innerHTML = row(K.inv) + card('Inventory by entity', scope().map(x => '<div class="bar"><b>' + x.entity + '</b><div class="t"><div class="f" style="width:' + cv(x.ccy, x.inv.total) / mxi * 100 + '%"></div></div><span>' + fmt(x.inv.total, x.ccy) + '</span></div>').join(''), 'Total cost per balance sheet') +
+    card('Inventory accounts', '<table><thead><tr><th>Entity</th><th>Account</th><th class="num">Balance</th></tr></thead><tbody>' + scope().map(x => x.inv.rows.map(a => '<tr><td>' + x.entity + '</td><td>' + esc(a.number + ' · ' + a.name) + '</td><td class="num">' + fmt(a.balance, x.ccy, 2) + '</td></tr>').join('')).join('') + '<tr class="sub"><td colspan="2">Consolidated (' + c + ')</td><td class="num">' + fmt(inv, '', 2) + '</td></tr></tbody></table>');
+  /* Trade commitments */
+  const byP = {}; big.forEach(x => byP[x.party] = (byP[x.party] || 0) + x.r); const pp = Object.entries(byP).sort((a, b) => b[1] - a[1]), mxp = pp.length ? pp[0][1] : 1;
+  P('tr').innerHTML = row(K.tr, K.lg, kv('Prepaid vs cash', cash.v ? Math.round(bt / cash.v * 100) + '%' : '—', 'Big prepayments ÷ available cash')) +
+    card('Big prepayments by counterparty', pp.map(([k, v]) => '<div class="bar"><b>' + esc(k) + '</b><div class="t"><div class="f" style="width:' + v / mxp * 100 + '%"></div></div><span>' + fmt(v, c) + '</span></div>').join('') || '<div class="muted">None above threshold.</div>',
+      'Show ≥ ' + c + ' <input id="tmin" type="number" value="' + IN.tmin + '" style="width:110px">') +
+    card('Down payments', '<table><thead><tr><th>Source</th><th>Entity</th><th>Counterparty</th><th>Ref</th><th>Details</th><th>Date</th><th class="num">Age (days)</th><th class="num">Amount</th><th class="num">In ' + c + '</th></tr></thead><tbody>' +
+      big.map(x => '<tr><td>' + x.src + '</td><td>' + x.e + '</td><td>' + esc(x.party) + '</td><td>' + esc(x.ref || '') + '</td><td>' + esc(x.note || '') + '</td><td>' + x.date + '</td><td class="num">' + Math.round((Date.now() - dt(x.date)) / 864e5) + '</td><td class="num">' + fmt(x.amt, x.cc) + '</td><td class="num">' + fmt(x.r) + '</td></tr>').join('') + '</tbody></table>', 'BC prepayments + finance input') +
+    card('Finance input', '<form data-f="tr"><select name="ent">' + ents + '</select><input name="party" placeholder="Counterparty" required style="width:150px"><input name="ref" placeholder="Ref / PO" style="width:110px"><input name="note" placeholder="Details" style="width:170px"><input name="date" type="date" required style="width:150px"><input name="amt" type="number" step="any" min="0" required placeholder="Amount (local ccy)" style="width:150px"><button>Add</button></form>' +
+      mlist('tr', x => '<td>' + x.ent + '</td><td>' + esc(x.party) + '</td><td>' + esc(x.ref || '') + '</td><td>' + x.date + '</td><td class="num">' + fmt(x.amt, eccy(x.ent)) + '</td>'));
+  /* Summary */
+  const al = [], arO = K._arO, apO = K._apO;
+  if (fc.lo.v < 0) al.push(['', 'Projected cash drops below zero in week ' + (fc.lo.i + 1) + ' (w/c ' + dlabel(fc.W[fc.lo.i].d) + ') — lowest ' + fmt(fc.lo.v, c) + '.']); else al.push(['ok', 'Projected cash stays positive for 13 weeks; lowest ' + fmt(fc.lo.v, c) + ' in week ' + (fc.lo.i + 1) + '.']);
+  if (apO > 0) al.push(['', 'Overdue payables of ' + fmt(apO, c) + ' are included in week 1 of the forecast.']);
+  if (feedMiss.length) al.push(['', 'OPEX feed missing for ' + feedMiss.join(', ') + ' — forecast fixed costs are understated.']);
+  P('sum').innerHTML = '<h3 class="sec">Liquidity</h3>' + row(K.cash, K.ar, K.arO, K.ap, K.apO, K.liq) + '<h3 class="sec">Costs &amp; outlook</h3>' + row(K.ox, K.fix, K.fc, K.lo) + '<h3 class="sec">Assets &amp; commitments</h3>' + row(K.inv, K.tr, K.lg) +
+    al.map(a => '<div class="note ' + a[0] + '">' + esc(a[1]) + '</div>').join('') + card('13-week cash outlook', line([fc.open, ...fc.W.map(w => w.cl)], ['Now', ...fc.W.map((_, i) => 'W' + (i + 1))]), c);
+}
+const mlist = (k, f, hint) => { const a = IN[k].filter(x => inScope(x.ent)); return a.length ? '<table style="margin-top:10px"><tbody>' + a.map(x => '<tr>' + f(x) + '<td class="num"><button data-del="' + k + ':' + x.id + '">Delete</button></td></tr>').join('') + '</tbody></table>' : '<div class="muted small" style="margin-top:8px">No entries yet. ' + (hint || '') + '</div>'; };
+
+document.addEventListener('submit', e => { const f = e.target.dataset.f; if (!f) return; e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); o.amt = +o.amt; o.id = Date.now(); IN[f].push(o); sv(f); render(); });
+document.addEventListener('click', e => { const d = e.target.dataset.del; if (!d) return; const [k, id] = d.split(':'); IN[k] = IN[k].filter(x => String(x.id) !== id); sv(k); render(); });
+document.addEventListener('change', e => { const t = e.target; if (t.dataset.fix) { IN.fix[t.dataset.fix] = t.checked; sv('fix'); render(); } if (t.dataset.fxr) { IN.fxr[t.dataset.fxr] = +t.value || 0; sv('fxr'); render(); } if (t.id === 'tmin') { IN.tmin = +t.value || 0; sv('tmin'); render(); } });
+
+/* ---- Wiring ---- */
+const drawE = () => document.querySelectorAll('#etabs button').forEach(b => b.classList.toggle('active', b.dataset.e === S.entity));
+$('etabs').onclick = e => { const k = e.target.dataset.e; if (!k) return; S.entity = k; setPref('entity', k); drawE(); render(); }; drawE();
+$('reload').onclick = load;
+$('tabs').onclick = e => { const p = e.target.dataset && e.target.dataset.p; if (!p || e.target.disabled) return;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === e.target));
+  document.querySelectorAll('.pane').forEach(x => x.classList.toggle('active', x.id === 'p-' + p)); };
+$('theme').onclick = () => { const d = document.documentElement.dataset.theme !== 'dark'; document.documentElement.dataset.theme = d ? 'dark' : 'light'; $('theme').textContent = d ? 'Light' : 'Dark'; };
+load();
+setInterval(() => { if (!document.hidden && !CONFIG.demo) load(); }, 5 * 60000);
+</script>
+</body>
+</html>
