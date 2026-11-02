@@ -47,6 +47,7 @@
   .note.ok { background:var(--accent-light); color:var(--good); border-color:var(--good); }
   h3.sec { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--sub); margin:18px 0 8px; }
   form[data-f] { display:flex; flex-wrap:wrap; gap:8px; } td button { padding:3px 8px; font-size:12px; }
+  table.tight th, table.tight td { padding:6px 7px; } table.tight th { font-size:10.5px; }
   .etabs { display:flex; background:var(--accent); padding:0 28px; } .etabs button { border:none; border-radius:0; background:none; color:#fff; opacity:.75; font-weight:700; font-size:14px; padding:10px 22px; }
   .etabs button.active { opacity:1; background:var(--paper); color:var(--accent); }
 </style>
@@ -74,7 +75,7 @@
 <script>
 /* ============ CONFIG ============ */
 const CONFIG = {
-  demo: false,                                   // true = built-in sample snapshot; set false to read the real file from SharePoint
+  demo: false,                                  // true = built-in sample snapshot; set false to read the real file from SharePoint
   tenantId: "ab7c8c1e-dc1d-431f-ba8b-e4de2b047f8b",
   clientId: "15ab80ca-fab7-4755-9f9b-5275c47dec90",   // "Finance AP Request" app registration (add this page's URL as a redirect URI)
   siteHost: "saxonrenewables.sharepoint.com", sitePath: "/sites/Operations",
@@ -82,9 +83,9 @@ const CONFIG = {
   filePath: "dashboard-snapshot.json",
   staleMinutes: 30
 };
-CONFIG.agedInLcy = false;   // set true if BC's aged AR/AP amounts are already in local currency (then currency only labels the row)
+CONFIG.agedInLcy = true;    // BC aged AR/AP API returns amounts in local currency (LCY); currency code only labels the row
 const ENTITIES = [{ key:'SG', ccy:'SGD', re:/pte|singapore|\bsg\b/i }, { key:'MY', ccy:'MYR', re:/sdn|bhd|malaysia|\bmy\b/i }];
-const BUCKETS = ['Current','1–30 days','31–60 days','61+ days'], COLORS = ['var(--good)','var(--gold)','var(--warn)','var(--bad)'];
+const BUCKETS = ['Not due','0–1 month','1–2 months','Over 2 months'], COLORS = ['var(--good)','var(--gold)','var(--warn)','var(--bad)'];
 
 /* ---- Sample snapshot: same shape the Power Automate flow writes ---- */
 const aged = (k, rows) => rows.map(r => ({ [k+'Number']: r[0], name: r[1], balanceDue: r[2]+r[3]+r[4]+r[5], currentAmount: r[2], period1Amount: r[3], period2Amount: r[4], period3Amount: r[5], currencyCode: r[6] || '' }));
@@ -133,7 +134,7 @@ function build(snap){
   return snap.companies.map(c => {
     const g = ENTITIES.find(e => e.re.test(c.name + ' ' + (c.displayName || ''))), key = map[c.id] ?? (g ? g.key : ''), ec = (ENTITIES.find(e => e.key === key) || {}).ccy || '';
     return { id: c.id, display: c.displayName || c.name, entity: key, ccy: (ENTITIES.find(e => e.key === key) || {}).ccy || '',
-      rc: cashOf(c.accounts || [], ec).rows, rr: { ar: agingOf(c.agedAR, false, ec).rows, ap: agingOf(c.agedAP, true, ec).rows }, cash: { rows: [], total: 0 }, inv: invOf(c.accounts || []), ox: opexOf(opexRows(c)), hasOx: opexRows(c).length > 0, due: (c.apDue || []).length ? c.apDue : null,
+      rc: cashOf(c.accounts || [], ec).rows, rr: { ar: agingOf(c.agedAR, false, ec).rows, ap: agingOf(c.agedAP, true, ec).rows }, cash: { rows: [], total: 0 }, inv: invOf(c), ox: opexOf(opexRows(c)), hasOx: opexRows(c).length > 0, due: (c.apDue || []).length ? c.apDue : null,
       pre: preRows(c).map(p => ({ party: p.vendor || p.name || '', ref: p.reference || '', note: p.description || '', date: p.date, amt: Number(p.amount || 0), src: 'BC' })), ar: null, ap: null };
   });
 }
@@ -194,7 +195,7 @@ function agingPane(k, name, party){
     b.map((x, i) => '<span><i style="background:' + COLORS[i] + '"></i>' + BUCKETS[i] + ' <b>' + fmt(x.v, ccy()) + '</b> (' + Math.round(Math.max(x.v, 0)/T*100) + '%)</span>').join('') + '</div>' +
     '<table><thead><tr><th>' + party + '</th><th>Entity</th><th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' +
     rows.slice(0, 15).map(r => '<tr><td>' + esc(r.n) + '</td><td>' + r.e + '</td><td class="num">' + fmt(r.t, '', 0) + '</td>' + r.b.map(x => '<td class="num">' + fmt(x, '', 0) + '</td>').join('') + '</tr>').join('') +
-    '</tbody></table><div class="muted small" style="margin-top:8px;">Top 15 of ' + rows.length + ', in ' + ccy() + '.</div></div>';
+    '</tbody></table><div class="muted small" style="margin-top:8px;">' + (rows.length > 15 ? 'Top 15 of ' + rows.length : rows.length + ' ' + party.toLowerCase() + (rows.length === 1 ? '' : 's')) + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
 }
 
 /* ============ MULTI-CURRENCY: balances kept in their own currency, FX rate per entity (finance input) ============ */
@@ -237,13 +238,52 @@ SAMPLE.companies[1].opex = genOx({ Payroll: 420000, Rent: 95000, Utilities: 3800
 SAMPLE.companies[0].prepayments = [{ vendor: 'Sunrise Supply', reference: 'PO-SG-1042', description: 'Biomass pellets – Q1 cargo', date: ago(38), amount: 450000 }, { vendor: 'Terra Certificates', reference: 'PO-SG-1051', description: 'REC forward purchase', date: ago(21), amount: 180000 }, { vendor: 'Apex Shipping', reference: 'PO-SG-1060', description: 'Freight deposit', date: ago(9), amount: 40000 }];
 SAMPLE.companies[1].prepayments = [{ vendor: 'Plantation Supply', reference: 'PO-MY-2210', description: 'Palm kernel shell – 3 shipments', date: ago(52), amount: 1250000 }, { vendor: 'Port Klang Freight', reference: 'PO-MY-2234', description: 'Port handling deposit', date: ago(15), amount: 210000 }, { vendor: 'Eco Haulage', reference: 'PO-MY-2240', description: 'Haulage deposit', date: ago(6), amount: 35000 }];
 
+const genInv = (rows) => ({ items: rows.map(r => ({ no: r[0], desc: r[1], grp: r[2], uom: r[3] })), itemLedger: rows.flatMap(r => r[4].map(([q, c], k) => ({ i: r[0], q, c, d: ago(200 - k * 30) }))) });
+Object.assign(SAMPLE.companies[1], genInv([
+  ['0387BUR_MYCC', 'MALAYSIA CARBON CREDIT V21 (BCX)', 'CARBON CREDIT', 'VCU', [[26, 1276.6]]],
+  ['01053SEB_MYL', 'MALAYSIA LARGE HYDRO RECS V25 (IREC)', 'RECS', 'RECS', [[13599, 67995], [-1687, -8435]]],
+  ['01266BIT_VNHY', 'VIETNAM HYDRO RECS V25 (IREC)', 'RECS', 'RECS', [[200, 48.6], [-200, -48.6]]],
+  ['01338SUS_MYS', 'MALAYSIA SOLAR RECS V25 (IREC)', 'RECS', 'RECS', [[11211, 77804.34], [-6000, -41640]]],
+  ['01344TAD_MYS', 'MALAYSIA SOLAR RECS V26 (IREC)', 'RECS', 'RECS', [[-14000, -175920.08]]],
+  ['01346SUS_MYS', 'MALAYSIA SOLAR RECS V26 (IREC)', 'RECS', 'RECS', [[12156.392, 123995.2], [-2232, -22766.4]]],
+  ['01370REC_MYS', 'MALAYSIA SOLAR RECS V25 (IREC)', 'RECS', 'RECS', [[446, 2190.62], [-280, -1375.28]]],
+  ['01363DE_MYS', 'MALAYSIA SOLAR RECS V24 (TIGR)', 'RECS', 'RECS', [[6059, 6714.91], [-6059, -6714.91]]],
+  ['0459EDR_MYSL', 'MALAYSIA SOLAR RECS V24 (IREC)', 'RECS', 'RECS', [[3613.46, 64464.13]]]]));
+Object.assign(SAMPLE.companies[0], genInv([
+  ['S1001_VNS', 'VIETNAM SOLAR RECS V25 (IREC)', 'RECS', 'RECS', [[50000, 21000], [-18000, -7560]]],
+  ['S1002_IDG', 'INDONESIA GEOTHERMAL RECS V25 (IREC)', 'RECS', 'RECS', [[20000, 30000], [-5000, -7500]]],
+  ['S1003_THW', 'THAILAND WIND RECS V24 (TIGR)', 'RECS', 'RECS', [[8000, 4800]]]]));
+
 /* ---- BC data per company ---- */
 const nameMap = c => { const m = {}; (c.accounts || []).forEach(a => m[a.number] = a.displayName); return m; };
 function opexRows(c){ if ((c.opex || []).length) return c.opex; const nm = nameMap(c); return (c.glExpense || []).map(g => ({ month: g.m, category: nm[g.a] || g.a, amount: Number(g.v || 0) })); }
 function preRows(c){ if ((c.prepayments || []).length) return c.prepayments; const nm = nameMap(c), g = {};
   (c.glPrepay || []).forEach(r => { const k = r.d || r.desc, dte = String(r.date).slice(0, 10), x = g[k] || (g[k] = { reference: r.d || '', vendor: r.desc || nm[r.a] || '', description: nm[r.a] || '', date: dte, amount: 0 }); x.amount += Number(r.v || 0); if (dte < x.date) x.date = dte; });
   return Object.values(g).filter(x => x.amount > 0.5); }
-const invOf = a => { const rows = a.filter(x => (x.accountType || 'Posting') === 'Posting' && /asset/i.test(x.category || 'Assets') && /inventor/i.test((x.subCategory || '') + ' ' + (x.displayName || ''))).map(x => ({ number: x.number, name: x.displayName, balance: Number(x.balance ?? x.totalBalance ?? 0) })); return { rows, total: rows.reduce((s, r) => s + r.balance, 0) }; };
+/* ---- Inventory valuation (same logic as BC "Inventory Valuation", actual cost): increases − decreases from item ledger entries ---- */
+const MULTI_C = ['SOUTH AFRICA','SRI LANKA','SAUDI ARABIA','UNITED STATES','UNITED KINGDOM','NEW ZEALAND','HONG KONG','SOUTH KOREA','COSTA RICA','EL SALVADOR','DOMINICAN REPUBLIC','UNITED ARAB EMIRATES','PAPUA NEW GUINEA','NORTH MACEDONIA','BOSNIA AND HERZEGOVINA','CZECH REPUBLIC','IVORY COAST'];
+const tcase = s => String(s || '').toLowerCase().replace(/(^|[\s(\-\/])([a-z])/g, (m, a, b) => a + b.toUpperCase());
+function parseDesc(d){   // "MALAYSIA LARGE HYDRO RECS V25 (IREC)" -> Malaysia · Large Hydro · RECs · 2025 · IREC
+  const s = String(d || '').trim().replace(/\s+/g, ' ');
+  const m = s.match(/^(.*?)\s+(I-?RECS?|RECS?|CARBON CREDITS?|VCUS?|VERS?)\s+V(\d{2,4})\b\s*(?:\(([^)]*)\)?)?/i);
+  if (!m) return { country: '', tech: '', kind: '', vintage: '', registry: '' };
+  const pre = m[1].toUpperCase(), country = MULTI_C.find(c => pre === c || pre.startsWith(c + ' ')) || pre.split(' ')[0];
+  return { country: tcase(country), tech: tcase(pre.slice(country.length).trim()), kind: /^CARBON|^VCU|^VER/i.test(m[2]) ? 'Carbon credit' : 'RECs',
+    vintage: m[3].length === 2 ? '20' + m[3] : m[3], registry: (m[4] || '').trim().toUpperCase() };
+}
+const r6 = n => Math.round(n * 1e6) / 1e6;
+function invOf(c){
+  const a = c.accounts || [], accts = a.filter(x => (x.accountType || 'Posting') === 'Posting' && /asset/i.test(x.category || 'Assets') && /inventor/i.test((x.subCategory || '') + ' ' + (x.displayName || ''))).map(x => ({ number: x.number, name: x.displayName, balance: Number(x.balance ?? x.totalBalance ?? x.netChange ?? 0) }));
+  const glTotal = accts.reduce((s, r) => s + r.balance, 0), led = c.itemLedger || [];
+  if (!led.length) return { items: [], accts, total: glTotal, glTotal, src: 'GL' };
+  const it = {}, g = {}; (c.items || []).forEach(x => it[x.no] = x);
+  led.forEach(e => { const r = g[e.i] || (g[e.i] = { no: e.i, iq: 0, iv: 0, dq: 0, dv: 0 }), q = Number(e.q || 0), v = Number(e.c || 0);
+    if (q > 0 || (q === 0 && v >= 0)) { r.iq += q; r.iv += v; } else { r.dq -= q; r.dv -= v; } });
+  const items = Object.values(g).map(r => { const m = it[r.no] || {}, p = parseDesc(m.desc), q = r6(r.iq - r.dq), v = r.iv - r.dv;
+    return { ...r, ...p, iq: r6(r.iq), dq: r6(r.dq), desc: m.desc || '', grp: m.grp || (p.kind === 'Carbon credit' ? 'CARBON CREDIT' : p.kind ? 'RECS' : 'OTHER'), uom: m.uom || '', q, v, unit: q ? v / q : null }; })
+    .sort((x, y) => (x.grp + x.no).localeCompare(y.grp + y.no));
+  return { items, accts, total: items.reduce((s, r) => s + r.v, 0), glTotal, src: 'ILE' };
+}
 const opexOf = rows => { const o = {}; rows.forEach(r => { const n = r.category || r.name || 'Other'; o[n] = o[n] || {}; o[n][r.month] = (o[n][r.month] || 0) + Number(r.amount || 0); }); return o; };
 const isFix = n => n in IN.fix ? IN.fix[n] : /payroll|salar|rent|lease|insur|utilit|deprec|subscri|audit/i.test(n);
 
@@ -288,13 +328,13 @@ const fxMsg = '<div class="card muted">Enter the FX rate to consolidate.</div>';
 const dlabel = d => d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
 function extra(K, cash, ar, ap){
   const P = id => $('p-' + id); ents = '<option>' + S.entity + '</option>';
-  P('cash').innerHTML = row(K.cash) + curCard('cash', 'Cash by currency') + P('cash').innerHTML; P('ar').innerHTML = row(K.ar, K.arO) + curCard('ar', 'Receivables by currency') + P('ar').innerHTML; P('ap').innerHTML = row(K.ap, K.apO) + curCard('ap', 'Payables by currency') + P('ap').innerHTML;
+  P('cash').innerHTML = row(K.cash) + curCard('cash', 'Cash by currency') + P('cash').innerHTML; P('ar').innerHTML = row(K.ar, K.arO) + (CONFIG.agedInLcy ? '' : curCard('ar', 'Receivables by currency')) + P('ar').innerHTML; P('ap').innerHTML = row(K.ap, K.apO) + (CONFIG.agedInLcy ? '' : curCard('ap', 'Payables by currency')) + P('ap').innerHTML;
   if (needFx()) { ['ox', 'fc', 'inv', 'tr', 'sum'].forEach(i => P(i).innerHTML = fxMsg); return; }
   const c = ccy(), ox = calcOx(), fc = calcFc(), inv = sum(x => x.inv.total).v, items = tradeItems(), big = items.filter(x => x.r >= IN.tmin), bt = big.reduce((s, x) => s + x.r, 0), n = ox.ms.length - 1;
   const avg = ox.tot.reduce((a, b) => a + b, 0) / ox.tot.length, end = fc.W[12];
   K.ox = kv('OPEX last month', fmt(ox.tot[n], c), '6-mo avg ' + fmt(avg, c)); K.fix = kv('Monthly fixed costs', fmt(fc.fm, c), 'Avg of last 3 months');
   K.fc = kv('Cash in 13 weeks', fmt(end.cl, c), 'w/c ' + dlabel(end.d), end.cl < 0 ? 'bad' : ''); K.lo = kv('Lowest projected cash', fmt(fc.lo.v, c), 'Week ' + (fc.lo.i + 1) + ' · w/c ' + dlabel(fc.W[fc.lo.i].d), fc.lo.v < 0 ? 'bad' : '');
-  K.inv = kv('Inventory (at cost)', fmt(inv, c), 'Balance sheet · BC'); K.tr = kv('Trade prepayments', fmt(bt, c), big.length + ' deals ≥ ' + fmt(IN.tmin, c)); K.lg = kv('Largest prepayment', big[0] ? fmt(big[0].r, c) : '—', big[0] ? esc(big[0].party) : 'None above threshold');
+  K.inv = kv('Inventory (at cost)', fmt(inv, c), scope().every(x => x.inv.src === 'ILE') ? 'Inventory valuation · actual cost' : 'Balance sheet · BC'); K.tr = kv('Trade prepayments', fmt(bt, c), big.length + ' deals ≥ ' + fmt(IN.tmin, c)); K.lg = kv('Largest prepayment', big[0] ? fmt(big[0].r, c) : '—', big[0] ? esc(big[0].party) : 'None above threshold');
   const feedMiss = scope().filter(x => !x.hasOx).map(x => x.entity);
   /* OPEX */
   const catOpts = ox.cats.map(x => '<option>' + esc(x.n) + '</option>').join('');
@@ -314,9 +354,7 @@ function extra(K, cash, ar, ap){
     card('Finance adjustments', '<form data-f="fc"><select name="ent">' + ents + '</select><input name="date" type="date" required style="width:150px"><input name="note" placeholder="Description" required style="width:200px"><input name="amt" type="number" step="any" required placeholder="Amount (− out, + in)" style="width:170px"><button>Add</button></form>' +
       mlist('fc', x => '<td>' + x.ent + '</td><td>' + x.date + '</td><td>' + esc(x.note) + '</td><td class="num">' + fmt(x.amt, eccy(x.ent)) + '</td>'), 'Local currency of the entity');
   /* Inventory */
-  const mxi = Math.max(...scope().map(x => cv(x.ccy, x.inv.total) || 0), 1);
-  P('inv').innerHTML = row(K.inv) + card('Inventory by entity', scope().map(x => '<div class="bar"><b>' + x.entity + '</b><div class="t"><div class="f" style="width:' + cv(x.ccy, x.inv.total) / mxi * 100 + '%"></div></div><span>' + fmt(x.inv.total, x.ccy) + '</span></div>').join(''), 'Total cost per balance sheet') +
-    card('Inventory accounts', '<table><thead><tr><th>Entity</th><th>Account</th><th class="num">Balance</th></tr></thead><tbody>' + scope().map(x => x.inv.rows.map(a => '<tr><td>' + x.entity + '</td><td>' + esc(a.number + ' · ' + a.name) + '</td><td class="num">' + fmt(a.balance, x.ccy, 2) + '</td></tr>').join('')).join('') + '<tr class="sub"><td colspan="2">Consolidated (' + c + ')</td><td class="num">' + fmt(inv, '', 2) + '</td></tr></tbody></table>');
+  P('inv').innerHTML = invPane(c);
   /* Trade commitments */
   const byP = {}; big.forEach(x => byP[x.party] = (byP[x.party] || 0) + x.r); const pp = Object.entries(byP).sort((a, b) => b[1] - a[1]), mxp = pp.length ? pp[0][1] : 1;
   P('tr').innerHTML = row(K.tr, K.lg, kv('Prepaid vs cash', cash.v ? Math.round(bt / cash.v * 100) + '%' : '—', 'Big prepayments ÷ available cash')) +
@@ -334,11 +372,38 @@ function extra(K, cash, ar, ap){
   P('sum').innerHTML = '<h3 class="sec">Liquidity</h3>' + row(K.cash, K.ar, K.arO, K.ap, K.apO, K.liq) + '<h3 class="sec">Costs &amp; outlook</h3>' + row(K.ox, K.fix, K.fc, K.lo) + '<h3 class="sec">Assets &amp; commitments</h3>' + row(K.inv, K.tr, K.lg) +
     al.map(a => '<div class="note ' + a[0] + '">' + esc(a[1]) + '</div>').join('') + card('13-week cash outlook', line([fc.open, ...fc.W.map(w => w.cl)], ['Now', ...fc.W.map((_, i) => 'W' + (i + 1))]), c);
 }
+IN.ig = pref('ig', 'tech'); IN.iz = pref('iz', false);
+const IGRP = { tech: ['Technology', x => (x.kind || 'Other') + (x.tech ? ' · ' + x.tech : '')], country: ['Country', x => x.country || '—'], vintage: ['Vintage', x => x.vintage || '—'], registry: ['Registry', x => x.registry || '—'], grp: ['Posting group', x => x.grp] };
+function invPane(c){
+  const all = []; scope().forEach(x => x.inv.items.forEach(r => all.push({ ...r, e: x.entity, cc: x.ccy, rv: cv(x.ccy, r.v) })));
+  if (!all.length) { const inv = sum(x => x.inv.total).v;
+    return row(kv('Inventory (at cost)', fmt(inv, c), 'Balance sheet · BC')) + '<div class="note">No item ledger data in the snapshot yet — showing G/L inventory accounts. Run the updated BC flow to get the Inventory Valuation view.</div>' +
+      card('Inventory accounts', '<table><thead><tr><th>Entity</th><th>Account</th><th class="num">Balance</th></tr></thead><tbody>' + scope().map(x => x.inv.accts.map(a => '<tr><td>' + x.entity + '</td><td>' + esc(a.number + ' · ' + a.name) + '</td><td class="num">' + fmt(a.balance, x.ccy, 2) + '</td></tr>').join('')).join('') + '</tbody></table>'); }
+  const tot = all.reduce((s, r) => s + r.rv, 0), pos = all.filter(r => r.q > 0), neg = all.filter(r => r.q < 0), gl = sum(x => x.inv.glTotal).v;
+  const [gl1, gf] = IGRP[IN.ig] || IGRP.tech, by = {}; all.filter(r => r.q || r.v).forEach(r => { const k = gf(r), o = by[k] || (by[k] = { v: 0, q: 0, n: 0 }); o.v += r.rv; o.q += r.q; o.n++; });
+  const bys = Object.entries(by).sort((a, b) => b[1].v - a[1].v), mx = Math.max(...bys.map(b => Math.abs(b[1].v)), 1);
+  const sel = '<select id="ig">' + Object.entries(IGRP).map(([k, v]) => '<option value="' + k + '"' + (k === IN.ig ? ' selected' : '') + '>' + v[0] + '</option>').join('') + '</select>';
+  const shown = all.filter(r => IN.iz || r.q || Math.abs(r.v) > 0.005), grps = [...new Set(shown.map(r => r.grp))];
+  const td = (v, d, cls) => '<td class="num"' + (cls ? ' style="' + cls + '"' : '') + '>' + (v ? fmt(v, '', d) : '') + '</td>', bad = 'color:var(--bad);font-weight:700';
+  const body = grps.map(g => { const rs = shown.filter(r => r.grp === g), gv = rs.reduce((s, r) => s + r.rv, 0);
+    return '<tr class="sub"><td colspan="13">' + esc(g) + '</td></tr>' + rs.map(r => '<tr data-s="' + esc((r.no + ' ' + r.desc + ' ' + r.country + ' ' + r.tech + ' ' + r.vintage + ' ' + r.registry).toLowerCase()) + '"><td title="' + esc(r.desc) + '">' + esc(r.no) + '</td><td>' + esc(r.country) + '</td><td>' + esc(r.tech || r.kind) + '</td><td>' + esc(r.vintage) + '</td><td>' + esc(r.registry) + '</td><td>' + esc(r.uom) + '</td>' +
+      td(r.iq, 2) + td(r.iv, 2) + td(r.dq, 2) + td(r.dv, 2) + '<td class="num" style="' + (r.q < 0 ? bad : 'font-weight:600') + '">' + fmt(r.q, '', Math.abs(r.q % 1) > 1e-9 ? 3 : 0) + '</td><td class="num" style="' + (r.v < 0 ? bad : 'font-weight:600') + '">' + fmt(r.v, '', 2) + '</td><td class="num">' + (r.unit == null ? '—' : fmt(r.unit, '', 4)) + '</td></tr>').join('') +
+      '<tr><td colspan="11" class="muted small">Total ' + esc(g) + '</td><td class="num"><b>' + fmt(gv, '', 2) + '</b></td><td></td></tr>'; }).join('');
+  return row(kv('Inventory (at cost)', fmt(tot, c), 'Remaining value · actual cost'), kv('Items in stock', String(pos.length), fmt(pos.reduce((s, r) => s + r.q, 0)) + ' units on hand'),
+      kv('Negative stock', String(neg.length), neg.length ? fmt(neg.reduce((s, r) => s + r.rv, 0), c) + ' — check postings' : 'None', neg.length ? 'bad' : ''),
+      kv('Valuation vs G/L', gl ? fmt(tot - gl, c) : '—', gl ? 'G/L inventory ' + fmt(gl, c) : 'No G/L inventory account found', gl && Math.abs(tot - gl) > 1 ? 'warn' : '')) +
+    (neg.length ? '<div class="note">' + neg.length + ' item(s) have negative remaining quantity (sold/transferred more than received): ' + esc(neg.slice(0, 6).map(r => r.no).join(', ')) + (neg.length > 6 ? '…' : '') + '.</div>' : '') +
+    card('Remaining value by ' + gl1.toLowerCase(), bys.map(([k, o]) => '<div class="bar"><b>' + esc(k) + '</b><div class="t"><div class="f" style="width:' + Math.max(o.v, 0) / mx * 100 + '%' + (o.v < 0 ? ';background:var(--bad)' : '') + '"></div></div><span>' + fmt(o.v, c) + ' · ' + fmt(o.q) + '</span></div>').join('') || '<div class="muted">No stock.</div>', 'Group by ' + sel) +
+    card('Inventory valuation', '<div class="tools" style="margin-bottom:10px"><input id="iq" type="search" placeholder="Search item, country, vintage…" style="width:240px"><label class="small muted"><input id="iz" type="checkbox" style="width:auto"' + (IN.iz ? ' checked' : '') + '> Show items with zero balance</label></div>' +
+      '<div style="overflow-x:auto"><table class="tight" style="font-size:12.5px"><thead><tr><th>Item no.</th><th>Country</th><th>Technology</th><th>Vintage</th><th>Registry</th><th>UoM</th><th class="num">Incr. qty</th><th class="num">Incr. value</th><th class="num">Decr. qty</th><th class="num">Decr. value</th><th class="num">Remaining qty</th><th class="num">Remaining value</th><th class="num">Unit cost</th></tr></thead><tbody id="invb">' + body +
+      '<tr class="sub"><td colspan="11">Total (' + c + ')</td><td class="num">' + fmt(tot, '', 2) + '</td><td></td></tr></tbody></table></div><div class="muted small" style="margin-top:8px">From first receipt to today, actual cost (like BC Inventory Valuation). Unit cost = remaining value ÷ remaining qty. Hover an item no. for its full description.</div>', 'Local currency · ' + c);
+}
+document.addEventListener('input', e => { if (e.target.id !== 'iq') return; const q = e.target.value.trim().toLowerCase(); document.querySelectorAll('#invb tr[data-s]').forEach(t => t.style.display = !q || t.dataset.s.includes(q) ? '' : 'none'); });
 const mlist = (k, f, hint) => { const a = IN[k].filter(x => inScope(x.ent)); return a.length ? '<table style="margin-top:10px"><tbody>' + a.map(x => '<tr>' + f(x) + '<td class="num"><button data-del="' + k + ':' + x.id + '">Delete</button></td></tr>').join('') + '</tbody></table>' : '<div class="muted small" style="margin-top:8px">No entries yet. ' + (hint || '') + '</div>'; };
 
 document.addEventListener('submit', e => { const f = e.target.dataset.f; if (!f) return; e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); o.amt = +o.amt; o.id = Date.now(); IN[f].push(o); sv(f); render(); });
 document.addEventListener('click', e => { const d = e.target.dataset.del; if (!d) return; const [k, id] = d.split(':'); IN[k] = IN[k].filter(x => String(x.id) !== id); sv(k); render(); });
-document.addEventListener('change', e => { const t = e.target; if (t.dataset.fix) { IN.fix[t.dataset.fix] = t.checked; sv('fix'); render(); } if (t.dataset.fxr) { IN.fxr[t.dataset.fxr] = +t.value || 0; sv('fxr'); render(); } if (t.id === 'tmin') { IN.tmin = +t.value || 0; sv('tmin'); render(); } });
+document.addEventListener('change', e => { const t = e.target; if (t.dataset.fix) { IN.fix[t.dataset.fix] = t.checked; sv('fix'); render(); } if (t.dataset.fxr) { IN.fxr[t.dataset.fxr] = +t.value || 0; sv('fxr'); render(); } if (t.id === 'ig') { IN.ig = t.value; setPref('ig', t.value); render(); } if (t.id === 'iz') { IN.iz = t.checked; setPref('iz', t.checked); render(); } if (t.id === 'tmin') { IN.tmin = +t.value || 0; sv('tmin'); render(); } });
 
 /* ---- Wiring ---- */
 const drawE = () => document.querySelectorAll('#etabs button').forEach(b => b.classList.toggle('active', b.dataset.e === S.entity));
