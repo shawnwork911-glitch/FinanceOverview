@@ -260,7 +260,7 @@ function opexRows(c){ if ((c.opex || []).length) return c.opex; const nm = nameM
 function preRows(c){ if ((c.prepayments || []).length) return c.prepayments; const nm = nameMap(c), g = {};
   (c.glPrepay || []).forEach(r => { const k = r.d || r.desc, dte = String(r.date).slice(0, 10), x = g[k] || (g[k] = { reference: r.d || '', vendor: r.desc || nm[r.a] || '', description: nm[r.a] || '', date: dte, amount: 0 }); x.amount += Number(r.v || 0); if (dte < x.date) x.date = dte; });
   return Object.values(g).filter(x => x.amount > 0.5); }
-/* ---- Inventory valuation (same logic as BC "Inventory Valuation", actual cost): increases − decreases from item ledger entries ---- */
+/* ---- Inventory valuation: remaining qty × buying unit cost (weighted average of purchase/receipt entries). Decrease values are NOT netted off, so sales/outbound values never distort the stock value ---- */
 const MULTI_C = ['SOUTH AFRICA','SRI LANKA','SAUDI ARABIA','UNITED STATES','UNITED KINGDOM','NEW ZEALAND','HONG KONG','SOUTH KOREA','COSTA RICA','EL SALVADOR','DOMINICAN REPUBLIC','UNITED ARAB EMIRATES','PAPUA NEW GUINEA','NORTH MACEDONIA','BOSNIA AND HERZEGOVINA','CZECH REPUBLIC','IVORY COAST'];
 const tcase = s => String(s || '').toLowerCase().replace(/(^|[\s(\-\/])([a-z])/g, (m, a, b) => a + b.toUpperCase());
 function parseDesc(d){   // "MALAYSIA LARGE HYDRO RECS V25 (IREC)" -> Malaysia · Large Hydro · RECs · 2025 · IREC
@@ -277,10 +277,13 @@ function invOf(c){
   const glTotal = accts.reduce((s, r) => s + r.balance, 0), led = c.itemLedger || [];
   if (!led.length) return { items: [], accts, total: glTotal, glTotal, src: 'GL' };
   const it = {}, g = {}; (c.items || []).forEach(x => it[x.no] = x);
-  led.forEach(e => { const r = g[e.i] || (g[e.i] = { no: e.i, iq: 0, iv: 0, dq: 0, dv: 0 }), q = Number(e.q || 0), v = Number(e.c || 0);
-    if (q > 0 || (q === 0 && v >= 0)) { r.iq += q; r.iv += v; } else { r.dq -= q; r.dv -= v; } });
-  const items = Object.values(g).map(r => { const m = it[r.no] || {}, p = parseDesc(m.desc), q = r6(r.iq - r.dq), v = r.iv - r.dv;
-    return { ...r, ...p, iq: r6(r.iq), dq: r6(r.dq), desc: m.desc || '', grp: m.grp || (p.kind === 'Carbon credit' ? 'CARBON CREDIT' : p.kind ? 'RECS' : 'OTHER'), uom: m.uom || '', q, v, unit: q ? v / q : null }; })
+  const hasType = led.some(e => e.t || e.entryType), isBuy = e => !hasType || /purch/i.test(e.t || e.entryType || '');
+  led.forEach(e => { const r = g[e.i] || (g[e.i] = { no: e.i, iq: 0, iv: 0, dq: 0, dv: 0, bq: 0, bv: 0 }), q = Number(e.q || 0), v = Number(e.c || 0);
+    if (q > 0 || (q === 0 && v >= 0)) { r.iq += q; r.iv += v; if (q > 0 && isBuy(e)) { r.bq += q; r.bv += v; } } else { r.dq -= q; r.dv -= v; } });
+  const items = Object.values(g).map(r => { const m = it[r.no] || {}, p = parseDesc(m.desc), q = r6(r.iq - r.dq),
+      unit = r.bq > 0 ? r.bv / r.bq : (r.iq > 0 ? r.iv / r.iq : null),   // buying unit cost = purchase value ÷ purchase qty
+      v = unit == null ? 0 : r6(q * unit);                                // actual inventory cost = remaining qty × buying unit cost
+    return { ...r, ...p, iq: r6(r.iq), dq: r6(r.dq), desc: m.desc || '', grp: m.grp || (p.kind === 'Carbon credit' ? 'CARBON CREDIT' : p.kind ? 'RECS' : 'OTHER'), uom: m.uom || '', q, v, unit, noCost: unit == null && q !== 0 }; })
     .sort((x, y) => (x.grp + x.no).localeCompare(y.grp + y.no));
   return { items, accts, total: items.reduce((s, r) => s + r.v, 0), glTotal, src: 'ILE' };
 }
@@ -334,7 +337,7 @@ function extra(K, cash, ar, ap){
   const avg = ox.tot.reduce((a, b) => a + b, 0) / ox.tot.length, end = fc.W[12];
   K.ox = kv('OPEX last month', fmt(ox.tot[n], c), '6-mo avg ' + fmt(avg, c)); K.fix = kv('Monthly fixed costs', fmt(fc.fm, c), 'Avg of last 3 months');
   K.fc = kv('Cash in 13 weeks', fmt(end.cl, c), 'w/c ' + dlabel(end.d), end.cl < 0 ? 'bad' : ''); K.lo = kv('Lowest projected cash', fmt(fc.lo.v, c), 'Week ' + (fc.lo.i + 1) + ' · w/c ' + dlabel(fc.W[fc.lo.i].d), fc.lo.v < 0 ? 'bad' : '');
-  K.inv = kv('Inventory (at cost)', fmt(inv, c), scope().every(x => x.inv.src === 'ILE') ? 'Inventory valuation · actual cost' : 'Balance sheet · BC'); K.tr = kv('Trade prepayments', fmt(bt, c), big.length + ' deals ≥ ' + fmt(IN.tmin, c)); K.lg = kv('Largest prepayment', big[0] ? fmt(big[0].r, c) : '—', big[0] ? esc(big[0].party) : 'None above threshold');
+  K.inv = kv('Inventory (at cost)', fmt(inv, c), scope().every(x => x.inv.src === 'ILE') ? 'Remaining qty × buying unit cost' : 'Balance sheet · BC'); K.tr = kv('Trade prepayments', fmt(bt, c), big.length + ' deals ≥ ' + fmt(IN.tmin, c)); K.lg = kv('Largest prepayment', big[0] ? fmt(big[0].r, c) : '—', big[0] ? esc(big[0].party) : 'None above threshold');
   const feedMiss = scope().filter(x => !x.hasOx).map(x => x.entity);
   /* OPEX */
   const catOpts = ox.cats.map(x => '<option>' + esc(x.n) + '</option>').join('');
@@ -387,16 +390,16 @@ function invPane(c){
   const td = (v, d, cls) => '<td class="num"' + (cls ? ' style="' + cls + '"' : '') + '>' + (v ? fmt(v, '', d) : '') + '</td>', bad = 'color:var(--bad);font-weight:700';
   const body = grps.map(g => { const rs = shown.filter(r => r.grp === g), gv = rs.reduce((s, r) => s + r.rv, 0);
     return '<tr class="sub"><td colspan="13">' + esc(g) + '</td></tr>' + rs.map(r => '<tr data-s="' + esc((r.no + ' ' + r.desc + ' ' + r.country + ' ' + r.tech + ' ' + r.vintage + ' ' + r.registry).toLowerCase()) + '"><td title="' + esc(r.desc) + '">' + esc(r.no) + '</td><td>' + esc(r.country) + '</td><td>' + esc(r.tech || r.kind) + '</td><td>' + esc(r.vintage) + '</td><td>' + esc(r.registry) + '</td><td>' + esc(r.uom) + '</td>' +
-      td(r.iq, 2) + td(r.iv, 2) + td(r.dq, 2) + td(r.dv, 2) + '<td class="num" style="' + (r.q < 0 ? bad : 'font-weight:600') + '">' + fmt(r.q, '', Math.abs(r.q % 1) > 1e-9 ? 3 : 0) + '</td><td class="num" style="' + (r.v < 0 ? bad : 'font-weight:600') + '">' + fmt(r.v, '', 2) + '</td><td class="num">' + (r.unit == null ? '—' : fmt(r.unit, '', 4)) + '</td></tr>').join('') +
+      td(r.iq, 2) + td(r.iv, 2) + td(r.dq, 2) + td(r.dv, 2) + '<td class="num" style="' + (r.q < 0 ? bad : 'font-weight:600') + '">' + fmt(r.q, '', Math.abs(r.q % 1) > 1e-9 ? 3 : 0) + '</td><td class="num" style="' + (r.v < 0 ? bad : 'font-weight:600') + '">' + fmt(r.v, '', 2) + '</td><td class="num"' + (r.noCost ? ' style="color:var(--warn)" title="No purchase receipt found — cannot value"' : '') + '>' + (r.unit == null ? (r.noCost ? 'No cost' : '—') : fmt(r.unit, '', 4)) + '</td></tr>').join('') +
       '<tr><td colspan="11" class="muted small">Total ' + esc(g) + '</td><td class="num"><b>' + fmt(gv, '', 2) + '</b></td><td></td></tr>'; }).join('');
-  return row(kv('Inventory (at cost)', fmt(tot, c), 'Remaining value · actual cost'), kv('Items in stock', String(pos.length), fmt(pos.reduce((s, r) => s + r.q, 0)) + ' units on hand'),
+  return row(kv('Inventory (at cost)', fmt(tot, c), 'Remaining qty × buying unit cost'), kv('Items in stock', String(pos.length), fmt(pos.reduce((s, r) => s + r.q, 0)) + ' units on hand'),
       kv('Negative stock', String(neg.length), neg.length ? fmt(neg.reduce((s, r) => s + r.rv, 0), c) + ' — check postings' : 'None', neg.length ? 'bad' : ''),
       kv('Valuation vs G/L', gl ? fmt(tot - gl, c) : '—', gl ? 'G/L inventory ' + fmt(gl, c) : 'No G/L inventory account found', gl && Math.abs(tot - gl) > 1 ? 'warn' : '')) +
     (neg.length ? '<div class="note">' + neg.length + ' item(s) have negative remaining quantity (sold/transferred more than received): ' + esc(neg.slice(0, 6).map(r => r.no).join(', ')) + (neg.length > 6 ? '…' : '') + '.</div>' : '') +
     card('Remaining value by ' + gl1.toLowerCase(), bys.map(([k, o]) => '<div class="bar"><b>' + esc(k) + '</b><div class="t"><div class="f" style="width:' + Math.max(o.v, 0) / mx * 100 + '%' + (o.v < 0 ? ';background:var(--bad)' : '') + '"></div></div><span>' + fmt(o.v, c) + ' · ' + fmt(o.q) + '</span></div>').join('') || '<div class="muted">No stock.</div>', 'Group by ' + sel) +
     card('Inventory valuation', '<div class="tools" style="margin-bottom:10px"><input id="iq" type="search" placeholder="Search item, country, vintage…" style="width:240px"><label class="small muted"><input id="iz" type="checkbox" style="width:auto"' + (IN.iz ? ' checked' : '') + '> Show items with zero balance</label></div>' +
-      '<div style="overflow-x:auto"><table class="tight" style="font-size:12.5px"><thead><tr><th>Item no.</th><th>Country</th><th>Technology</th><th>Vintage</th><th>Registry</th><th>UoM</th><th class="num">Incr. qty</th><th class="num">Incr. value</th><th class="num">Decr. qty</th><th class="num">Decr. value</th><th class="num">Remaining qty</th><th class="num">Remaining value</th><th class="num">Unit cost</th></tr></thead><tbody id="invb">' + body +
-      '<tr class="sub"><td colspan="11">Total (' + c + ')</td><td class="num">' + fmt(tot, '', 2) + '</td><td></td></tr></tbody></table></div><div class="muted small" style="margin-top:8px">From first receipt to today, actual cost (like BC Inventory Valuation). Unit cost = remaining value ÷ remaining qty. Hover an item no. for its full description.</div>', 'Local currency · ' + c);
+      '<div style="overflow-x:auto"><table class="tight" style="font-size:12.5px"><thead><tr><th>Item no.</th><th>Country</th><th>Technology</th><th>Vintage</th><th>Registry</th><th>UoM</th><th class="num">Incr. qty</th><th class="num">Incr. value</th><th class="num">Decr. qty</th><th class="num">Decr. value</th><th class="num">Remaining qty</th><th class="num">Remaining value</th><th class="num">Buying unit cost</th></tr></thead><tbody id="invb">' + body +
+      '<tr class="sub"><td colspan="11">Total (' + c + ')</td><td class="num">' + fmt(tot, '', 2) + '</td><td></td></tr></tbody></table></div><div class="muted small" style="margin-top:8px">Buying unit cost = purchase value ÷ purchase qty (weighted average of receipts). Remaining value = remaining qty × buying unit cost — sale/outbound values are shown for reference only and are not deducted. Items with stock but no purchase receipt show “No cost” and are valued at 0. Hover an item no. for its full description.</div>', 'Local currency · ' + c);
 }
 document.addEventListener('input', e => { if (e.target.id !== 'iq') return; const q = e.target.value.trim().toLowerCase(); document.querySelectorAll('#invb tr[data-s]').forEach(t => t.style.display = !q || t.dataset.s.includes(q) ? '' : 'none'); });
 const mlist = (k, f, hint) => { const a = IN[k].filter(x => inScope(x.ent)); return a.length ? '<table style="margin-top:10px"><tbody>' + a.map(x => '<tr>' + f(x) + '<td class="num"><button data-del="' + k + ':' + x.id + '">Delete</button></td></tr>').join('') + '</tbody></table>' : '<div class="muted small" style="margin-top:8px">No entries yet. ' + (hint || '') + '</div>'; };
