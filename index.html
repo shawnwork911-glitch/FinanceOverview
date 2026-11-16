@@ -147,7 +147,7 @@ function cashOf(accts, base){
 }
 function agingOf(raw, ap, base){
   let rows = (raw || []).map(r => { const b = [r.currentAmount, r.period1Amount, r.period2Amount, r.period3Amount].map(x => Number(x||0));
-    return { no: String(r.customerNumber || r.vendorNumber || r.number || ''), name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => (r.total || r.b.some(Boolean)) && !(/^total$/i.test(r.name.trim()) && !r.no));
+    return { no: String(r.customerNumber || r.vendorNumber || r.number || ''), name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => (Math.abs(r.total) > 0.005 || r.b.some(x => Math.abs(x) > 0.005)) && !(/^total$/i.test(r.name.trim()) && !r.no));
   if (ap && rows.reduce((s, r) => s + r.total, 0) < 0) rows = rows.map(r => ({ ...r, total: -r.total, b: r.b.map(x => -x) }));
   return { rows: rows.sort((x, y) => y.total - x.total), b: [0,1,2,3].map(i => rows.reduce((s, r) => s + r.b[i], 0)), total: rows.reduce((s, r) => s + r.total, 0) };
 }
@@ -157,7 +157,7 @@ function bucketOf(due){ if (!due) return 0; const d = Math.floor((Date.now() - n
 function withDetail(rows, raw, ap, base){
   const det = (raw || []).map(r => ({ no: String(r.customerNumber || r.vendorNumber || r.partyNo || ''), party: r.name || r.customerName || r.vendorName || r.partyName || '',
     doc: r.documentNo || r.invoiceNo || r.number || '', ext: r.externalDocumentNo || r.vendorInvoiceNo || '', inv: dstr(r.invoiceDate || r.postingDate), due: dstr(r.dueDate), terms: r.paymentTerms || r.paymentTermsCode || '',
-    ord: r.orderNo || r.orderNumber || r.poNumber || r.soNumber || '', ordDate: dstr(r.orderDate || r.poDate || r.soDate), amt: Number(r.remainingAmountLCY ?? r.remainingAmount ?? r.amount ?? 0) }));
+    ord: r.orderNo || r.orderNumber || r.poNumber || r.soNumber || '', ordDate: dstr(r.orderDate || r.poDate || r.soDate), amt: Number(r.remainingAmountLCY ?? r.remainingAmount ?? r.amount ?? 0) })).filter(d => Math.abs(d.amt) > 0.005);   // zero remaining = fully posted/paid, not listed
   if (!det.length) return rows;
   if (ap && det.reduce((t, d) => t + d.amt, 0) < 0) det.forEach(d => d.amt = -d.amt);
   const g = {}; det.forEach(d => (g[(d.no || d.party).toLowerCase()] = g[(d.no || d.party).toLowerCase()] || []).push(d));
@@ -227,23 +227,24 @@ function agingPane(k, name, party){
   const T = b.reduce((s, x) => s + Math.max(x.v, 0), 0) || 1, rows = [], lab = k === 'ar' ? 'SO' : 'PO', today = new Date();
   scope().forEach(c => c[k].rows.forEach(r => rows.push({ e: c.entity, n: r.name + (r.cur !== c.ccy ? ' · ' + r.cur : ''), t: conv(c, r.total), b: r.b.map(x => conv(c, x)), det: (r.det || []).map(d => ({ ...d, amt: conv(c, d.amt) })) })));
   rows.sort((x, y) => y.t - x.t);
-  const hasDet = rows.some(r => r.det.length), N = x => '<td class="num">' + fmt(x, '', 0) + '</td>', E = n => '<td></td>'.repeat(n);
+  const vrows = IN.nz ? rows : rows.filter(r => Math.abs(r.t) > 0.005), nzN = rows.length - rows.filter(r => Math.abs(r.t) > 0.005).length, hasDet = rows.some(r => r.det.length), N = x => '<td class="num">' + fmt(x, '', 0) + '</td>', E = n => '<td></td>'.repeat(n);
   let body;
-  if (hasDet) body = rows.map(r => { const key = k + '|' + r.e + '|' + r.n, open = EXP.has(key), ds = r.det.reduce((q, d) => q + d.amt, 0), diff = r.det.length && Math.abs(ds - r.t) > 1;
+  if (hasDet) body = vrows.map(r => { const key = k + '|' + r.e + '|' + r.n, open = EXP.has(key), ds = r.det.reduce((q, d) => q + d.amt, 0), diff = r.det.length && Math.abs(ds - r.t) > 1;
       return '<tr class="grp" ' + (r.det.length ? 'data-tg="' + esc(key) + '" data-hasdet="1" style="cursor:pointer"' : '') + '><td><b>' + (r.det.length ? '<span class="arw">' + (open ? '▾' : '▸') + '</span> ' : '') + esc(r.n) + '</b>' + (r.det.length ? ' <span class="muted small" data-nx>' + r.det.length + ' invoice' + (r.det.length > 1 ? 's' : '') + '</span>' : ' <span class="muted small" data-nx>no invoice detail</span>') +
-        (diff ? ' <span class="muted small" data-nx style="color:var(--warn)" title="Sum of invoices ' + fmt(ds, '', 0) + ' vs aged total ' + fmt(r.t, '', 0) + '">≠ aged total</span>' : '') + '</td><td>' + r.e + '</td>' + E(6) + N(r.t) + r.b.map(N).join('') + '</tr>' +
+        (Math.abs(r.t) <= 0.005 ? ' <span class="muted small" data-nx style="color:var(--warn)">net 0 · offsetting items</span>' : '') + (diff ? ' <span class="muted small" data-nx style="color:var(--warn)" title="Sum of invoices ' + fmt(ds, '', 0) + ' vs aged total ' + fmt(r.t, '', 0) + '">≠ aged total</span>' : '') + '</td><td>' + r.e + '</td>' + E(6) + N(r.t) + r.b.map(N).join('') + '</tr>' +
         r.det.slice().sort((x, y) => (x.due || '').localeCompare(y.due || '')).map(d => { const bi = bucketOf(d.due), od = d.due ? Math.max(0, Math.floor((today - new Date(d.due + 'T00:00:00')) / 864e5)) : '';
           return '<tr class="gd' + (open ? '' : ' hide') + '" data-gk="' + esc(key) + '"><td style="padding-left:28px"><span class="xo">' + esc(r.n) + '</span></td><td><span class="xo">' + r.e + '</span></td><td>' + esc(d.ord || '—') + '</td><td>' + esc(d.doc + (d.ext ? ' (' + d.ext + ')' : '')) + '</td><td>' + esc(d.inv || '—') + '</td><td>' + esc(d.terms || (d.inv && d.due ? Math.round((new Date(d.due) - new Date(d.inv)) / 864e5) + ' days' : '—')) + '</td><td>' + esc(d.due || '—') + '</td><td class="num">' + (od || '') + '</td>' + N(d.amt) + [0, 1, 2, 3].map(i => i === bi ? N(d.amt) : '<td></td>').join('') + '</tr>'; }).join(''); }).join('');
-  else body = rows.map(r => '<tr><td>' + esc(r.n) + '</td><td>' + r.e + '</td>' + N(r.t) + r.b.map(N).join('') + '</tr>').join('');
+  else body = vrows.map(r => '<tr><td>' + esc(r.n) + (Math.abs(r.t) <= 0.005 ? ' <span class="muted small" data-nx style="color:var(--warn)">net 0 · offsetting items</span>' : '') + '</td><td>' + r.e + '</td>' + N(r.t) + r.b.map(N).join('') + '</tr>').join('');
   $('p-' + k).innerHTML = '<div class="card"><div class="head"><h2>' + name + ' aging</h2><span class="muted small">Total ' + fmt(b.reduce((s, x) => s + x.v, 0), ccy()) + '</span></div><div class="seg">' +
     b.map((x, i) => '<span style="width:' + Math.max(x.v, 0)/T*100 + '%;background:' + COLORS[i] + '" title="' + BUCKETS[i] + '"></span>').join('') + '</div><div class="legend">' +
     b.map((x, i) => '<span><i style="background:' + COLORS[i] + '"></i>' + BUCKETS[i] + ' <b>' + fmt(x.v, ccy()) + '</b> (' + Math.round(Math.max(x.v, 0)/T*100) + '%)</span>').join('') + '</div>' +
-    (hasDet ? '<div class="tools" style="margin:12px 0 8px"><button data-xall="1">Expand all</button><button data-xall="0">Collapse all</button><span class="muted small">Click a ' + party.toLowerCase() + ' to show its invoices</span></div>'
+    '<div class="tools" style="margin:12px 0 8px">' + (hasDet ? '<button data-xall="1">Expand all</button><button data-xall="0">Collapse all</button><span class="muted small">Click a ' + party.toLowerCase() + ' to show its invoices</span>' : '') + (nzN ? '<label class="small muted" style="margin-left:auto"><input id="nz" type="checkbox" style="width:auto"' + (IN.nz ? ' checked' : '') + '> Show ' + nzN + ' net-zero ' + party.toLowerCase() + (nzN > 1 ? 's' : '') + ' with open items (offsetting balances)</label>' : '') + '</div>' + (hasDet ? ''
       : '<div class="note">No invoice-level data in the snapshot yet, so only aged totals are shown. Add <b>open' + k.toUpperCase() + '</b> to each company in the snapshot (one row per open invoice: ' + party.toLowerCase() + ' name/number, invoice no., invoice date, due date, payment terms, ' + lab + ' no., ' + lab + ' date, remaining amount) to see the ' + lab + ' / invoice breakdown under each ' + party.toLowerCase() + '.</div>') +
     '<div style="overflow-x:auto"><table ' + (hasDet ? 'data-flat="1"' : '') + '><thead><tr><th>' + party + '</th><th>Entity</th>' + (hasDet ? '<th>' + lab + ' no.</th><th>Invoice no.</th><th>Invoice date</th><th>Payment terms</th><th>Due date</th><th class="num">Days overdue</th>' : '') + '<th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' + body +
-    '</tbody></table></div><div class="muted small" style="margin-top:8px;">' + rows.length + ' ' + party.toLowerCase() + (rows.length === 1 ? '' : 's') + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
+    '</tbody></table></div><div class="muted small" style="margin-top:8px;">' + vrows.length + ' ' + party.toLowerCase() + (vrows.length === 1 ? '' : 's') + (nzN && !IN.nz ? ' (' + nzN + ' net-zero hidden)' : '') + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
 }
 const EXP = new Set();
+document.addEventListener('change', e => { if (e.target.id === 'nz') { IN.nz = e.target.checked; setPref('nz', IN.nz); render(); } });
 document.addEventListener('click', e => { const x = e.target.closest && e.target.closest('[data-xall]'), tg = e.target.closest && e.target.closest('tr[data-tg]'), pane = e.target.closest && e.target.closest('.pane');
   const set = (key, on) => { on ? EXP.add(key) : EXP.delete(key); pane.querySelectorAll('tr.gd').forEach(r => { if (r.dataset.gk === key) r.classList.toggle('hide', !on); }); pane.querySelectorAll('tr[data-tg]').forEach(r => { if (r.dataset.tg === key) r.querySelector('.arw').textContent = on ? '▾' : '▸'; }); };
   if (x && pane) pane.querySelectorAll('tr[data-tg]').forEach(r => set(r.dataset.tg, x.dataset.xall === '1'));
@@ -426,7 +427,7 @@ function extra(K, cash, ar, ap){
   P('sum').innerHTML = '<h3 class="sec">Liquidity</h3>' + row(K.cash, K.ar, K.arO, K.ap, K.apO, K.liq) + '<h3 class="sec">Costs &amp; outlook</h3>' + row(K.ox, K.fix, K.fc, K.lo) + '<h3 class="sec">Assets &amp; commitments</h3>' + row(K.inv, K.tr, K.lg) +
     al.map(a => '<div class="note ' + a[0] + '">' + esc(a[1]) + '</div>').join('') + card('13-week cash outlook', line([fc.open, ...fc.W.map(w => w.cl)], ['Now', ...fc.W.map((_, i) => 'W' + (i + 1))]), c);
 }
-IN.ig = pref('ig', 'tech');
+IN.ig = pref('ig', 'tech'); IN.nz = pref('nz', false);
 const IGRP = { tech: ['Technology', x => (x.kind || 'Other') + (x.tech ? ' · ' + x.tech : '')], country: ['Country', x => x.country || '—'], vintage: ['Vintage', x => x.vintage || '—'], registry: ['Registry', x => x.registry || '—'], grp: ['Posting group', x => x.grp] };
 function invPane(c){
   const raw = []; scope().forEach(x => x.inv.items.forEach(r => raw.push({ ...r, e: x.entity, cc: x.ccy, rv: cv(x.ccy, r.v) })));
