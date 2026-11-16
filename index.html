@@ -12,13 +12,13 @@
     --good:#2f9e68; --warn:#cf9433; --warn-bg:#332508; --bad:#d9534f; --gold:#c79a42; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 "Segoe UI","Helvetica Neue",Arial,sans-serif; }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:12px 28px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:12px clamp(20px,3vw,48px); background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
   h1 { font-size:18px; margin:0; } h2 { font-size:16px; margin:0; }
   .muted { color:var(--sub); } .small { font-size:12.5px; }
   .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   select, input, button { font:inherit; font-size:13px; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); }
   input { width:90px; } button { cursor:pointer; }
-  .wrap { max-width:1180px; margin:0 auto; padding:20px 28px 60px; }
+  .wrap { max-width:none; margin:0; padding:24px clamp(20px,3vw,48px) 60px; }
   .badge { font-size:11px; font-weight:700; text-transform:uppercase; padding:3px 8px; border-radius:10px; background:var(--warn-bg); color:var(--warn); }
   .note { font-size:12.5px; padding:9px 12px; border-radius:6px; margin-bottom:10px; background:var(--warn-bg); color:var(--warn); border:1px solid var(--warn); }
   .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:16px; }
@@ -30,8 +30,18 @@
   .tab { border:none; border-bottom:3px solid transparent; border-radius:0; background:none; font-weight:600; color:var(--sub); padding:10px 14px; }
   .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
   .tab:disabled { opacity:.45; cursor:not-allowed; }
-  #p-ar td, #p-ap td { white-space:nowrap; }
-  tr.gd.hide { display:none; } tr.grp td { background:var(--paper); } tr.gd td { font-size:12px; color:var(--muted); } .xo { display:none; }
+  #p-ar td, #p-ap td { white-space:nowrap; } #p-ar td:first-child, #p-ap td:first-child { white-space:normal; min-width:170px; } #p-ar th, #p-ap th { white-space:normal !important; }
+  #p-ar tr.gd td:nth-child(4), #p-ap tr.gd td:nth-child(4) { white-space:normal; word-break:break-word; min-width:150px; }
+  @media (max-width:1700px) { #p-ar table, #p-ap table { font-size:13.5px; } #p-ar td, #p-ap td, #p-ar th, #p-ap th { padding:10px 8px !important; } #p-ar .card, #p-ap .card { padding:18px 16px; } }
+  @media (max-width:1400px) { #p-ar table, #p-ap table { font-size:12.5px; } #p-ar td, #p-ap td, #p-ar th, #p-ap th { padding:8px 5px !important; } #p-ar th, #p-ap th { font-size:10.5px; } }
+  @media (max-width:1300px) { #p-ar table, #p-ap table { font-size:12px; } #p-ar td, #p-ap td, #p-ar th, #p-ap th { padding:8px 3px !important; } #p-ar .card, #p-ap .card { padding:16px 10px; } .wrap { padding-left:14px; padding-right:14px; } }
+  tr.gd.hide { display:none; } .xo { display:none; }
+  #p-ar table, #p-ap table { font-size:14.5px; } #p-ar th, #p-ap th { font-size:12px; letter-spacing:.03em; padding:12px 14px; background:var(--accent-light); color:var(--accent); border-bottom:2px solid var(--line); white-space:nowrap; }
+  #p-ar td, #p-ap td { padding:12px 14px; }
+  #p-ar tr.grp td, #p-ap tr.grp td { background:var(--paper); font-size:15px; border-top:1px solid var(--line); } #p-ar tr.grp[data-tg]:hover td, #p-ap tr.grp[data-tg]:hover td { background:var(--accent-light); }
+  #p-ar tr.gd td, #p-ap tr.gd td { color:var(--sub); border-bottom:1px dashed var(--line); } #p-ar tr.gd td:nth-child(n+3), #p-ap tr.gd td:nth-child(n+3) { color:var(--ink); }
+  #p-ar tr.gd td:first-child, #p-ap tr.gd td:first-child { border-left:3px solid var(--accent); }
+  #p-ar .card, #p-ap .card { padding:22px 26px; } #p-ar .kpi .v, #p-ap .kpi .v { font-size:26px; } .seg { height:30px; } .legend { font-size:14px; }
   .pane { display:none; } .pane.active { display:block; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:16px; }
   .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
@@ -50,7 +60,7 @@
   h3.sec { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--sub); margin:18px 0 8px; }
   form[data-f] { display:flex; flex-wrap:wrap; gap:8px; } td button { padding:3px 8px; font-size:12px; }
   table.tight th, table.tight td { padding:6px 7px; } table.tight th { font-size:10.5px; }
-  .etabs { display:flex; background:var(--accent); padding:0 28px; } .etabs button { border:none; border-radius:0; background:none; color:#fff; opacity:.75; font-weight:700; font-size:14px; padding:10px 22px; }
+  .etabs { display:flex; background:var(--accent); padding:0 clamp(20px,3vw,48px); } .etabs button { border:none; border-radius:0; background:none; color:#fff; opacity:.75; font-weight:700; font-size:14px; padding:10px 22px; }
   .etabs button.active { opacity:1; background:var(--paper); color:var(--accent); }
 </style>
 </head>
@@ -137,7 +147,7 @@ function cashOf(accts, base){
 }
 function agingOf(raw, ap, base){
   let rows = (raw || []).map(r => { const b = [r.currentAmount, r.period1Amount, r.period2Amount, r.period3Amount].map(x => Number(x||0));
-    return { no: String(r.customerNumber || r.vendorNumber || r.number || ''), name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => r.total || r.b.some(Boolean));
+    return { no: String(r.customerNumber || r.vendorNumber || r.number || ''), name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => (r.total || r.b.some(Boolean)) && !(/^total$/i.test(r.name.trim()) && !r.no));
   if (ap && rows.reduce((s, r) => s + r.total, 0) < 0) rows = rows.map(r => ({ ...r, total: -r.total, b: r.b.map(x => -x) }));
   return { rows: rows.sort((x, y) => y.total - x.total), b: [0,1,2,3].map(i => rows.reduce((s, r) => s + r.b[i], 0)), total: rows.reduce((s, r) => s + r.total, 0) };
 }
@@ -221,16 +231,16 @@ function agingPane(k, name, party){
   let body;
   if (hasDet) body = rows.map(r => { const key = k + '|' + r.e + '|' + r.n, open = EXP.has(key), ds = r.det.reduce((q, d) => q + d.amt, 0), diff = r.det.length && Math.abs(ds - r.t) > 1;
       return '<tr class="grp" ' + (r.det.length ? 'data-tg="' + esc(key) + '" data-hasdet="1" style="cursor:pointer"' : '') + '><td><b>' + (r.det.length ? '<span class="arw">' + (open ? '▾' : '▸') + '</span> ' : '') + esc(r.n) + '</b>' + (r.det.length ? ' <span class="muted small" data-nx>' + r.det.length + ' invoice' + (r.det.length > 1 ? 's' : '') + '</span>' : ' <span class="muted small" data-nx>no invoice detail</span>') +
-        (diff ? ' <span class="muted small" data-nx style="color:var(--warn)" title="Sum of invoices ' + fmt(ds, '', 0) + ' vs aged total ' + fmt(r.t, '', 0) + '">≠ aged total</span>' : '') + '</td><td>' + r.e + '</td>' + E(7) + N(r.t) + r.b.map(N).join('') + '</tr>' +
+        (diff ? ' <span class="muted small" data-nx style="color:var(--warn)" title="Sum of invoices ' + fmt(ds, '', 0) + ' vs aged total ' + fmt(r.t, '', 0) + '">≠ aged total</span>' : '') + '</td><td>' + r.e + '</td>' + E(6) + N(r.t) + r.b.map(N).join('') + '</tr>' +
         r.det.slice().sort((x, y) => (x.due || '').localeCompare(y.due || '')).map(d => { const bi = bucketOf(d.due), od = d.due ? Math.max(0, Math.floor((today - new Date(d.due + 'T00:00:00')) / 864e5)) : '';
-          return '<tr class="gd' + (open ? '' : ' hide') + '" data-gk="' + esc(key) + '"><td style="padding-left:28px"><span class="xo">' + esc(r.n) + '</span></td><td><span class="xo">' + r.e + '</span></td><td>' + esc(d.ord || '—') + '</td><td>' + esc(d.ordDate || '—') + '</td><td>' + esc(d.doc + (d.ext ? ' (' + d.ext + ')' : '')) + '</td><td>' + esc(d.inv || '—') + '</td><td>' + esc(d.terms || '—') + '</td><td>' + esc(d.due || '—') + '</td><td class="num">' + (od || '') + '</td>' + N(d.amt) + [0, 1, 2, 3].map(i => i === bi ? N(d.amt) : '<td></td>').join('') + '</tr>'; }).join(''); }).join('');
+          return '<tr class="gd' + (open ? '' : ' hide') + '" data-gk="' + esc(key) + '"><td style="padding-left:28px"><span class="xo">' + esc(r.n) + '</span></td><td><span class="xo">' + r.e + '</span></td><td>' + esc(d.ord || '—') + '</td><td>' + esc(d.doc + (d.ext ? ' (' + d.ext + ')' : '')) + '</td><td>' + esc(d.inv || '—') + '</td><td>' + esc(d.terms || (d.inv && d.due ? Math.round((new Date(d.due) - new Date(d.inv)) / 864e5) + ' days' : '—')) + '</td><td>' + esc(d.due || '—') + '</td><td class="num">' + (od || '') + '</td>' + N(d.amt) + [0, 1, 2, 3].map(i => i === bi ? N(d.amt) : '<td></td>').join('') + '</tr>'; }).join(''); }).join('');
   else body = rows.map(r => '<tr><td>' + esc(r.n) + '</td><td>' + r.e + '</td>' + N(r.t) + r.b.map(N).join('') + '</tr>').join('');
   $('p-' + k).innerHTML = '<div class="card"><div class="head"><h2>' + name + ' aging</h2><span class="muted small">Total ' + fmt(b.reduce((s, x) => s + x.v, 0), ccy()) + '</span></div><div class="seg">' +
     b.map((x, i) => '<span style="width:' + Math.max(x.v, 0)/T*100 + '%;background:' + COLORS[i] + '" title="' + BUCKETS[i] + '"></span>').join('') + '</div><div class="legend">' +
     b.map((x, i) => '<span><i style="background:' + COLORS[i] + '"></i>' + BUCKETS[i] + ' <b>' + fmt(x.v, ccy()) + '</b> (' + Math.round(Math.max(x.v, 0)/T*100) + '%)</span>').join('') + '</div>' +
     (hasDet ? '<div class="tools" style="margin:12px 0 8px"><button data-xall="1">Expand all</button><button data-xall="0">Collapse all</button><span class="muted small">Click a ' + party.toLowerCase() + ' to show its invoices</span></div>'
       : '<div class="note">No invoice-level data in the snapshot yet, so only aged totals are shown. Add <b>open' + k.toUpperCase() + '</b> to each company in the snapshot (one row per open invoice: ' + party.toLowerCase() + ' name/number, invoice no., invoice date, due date, payment terms, ' + lab + ' no., ' + lab + ' date, remaining amount) to see the ' + lab + ' / invoice breakdown under each ' + party.toLowerCase() + '.</div>') +
-    '<div style="overflow-x:auto"><table class="tight" ' + (hasDet ? 'data-flat="1" ' : '') + 'style="font-size:12.5px"><thead><tr><th>' + party + '</th><th>Entity</th>' + (hasDet ? '<th>' + lab + ' no.</th><th>' + lab + ' date</th><th>Invoice no.</th><th>Invoice date</th><th>Payment terms</th><th>Due date</th><th class="num">Days overdue</th>' : '') + '<th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' + body +
+    '<div style="overflow-x:auto"><table ' + (hasDet ? 'data-flat="1"' : '') + '><thead><tr><th>' + party + '</th><th>Entity</th>' + (hasDet ? '<th>' + lab + ' no.</th><th>Invoice no.</th><th>Invoice date</th><th>Payment terms</th><th>Due date</th><th class="num">Days overdue</th>' : '') + '<th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' + body +
     '</tbody></table></div><div class="muted small" style="margin-top:8px;">' + rows.length + ' ' + party.toLowerCase() + (rows.length === 1 ? '' : 's') + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
 }
 const EXP = new Set();
