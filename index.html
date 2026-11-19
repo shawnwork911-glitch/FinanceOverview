@@ -76,12 +76,12 @@
 <div class="wrap">
   <div id="warn"></div>
   <div class="tabs" id="tabs">
-    <button class="tab" data-p="cash">Cash</button><button class="tab" data-p="ar">Receivables</button><button class="tab" data-p="ap">Payables</button>
+    <button class="tab" data-p="cash">Cash</button><button class="tab" data-p="ar">Receivables</button><button class="tab" data-p="ap">Payables</button><button class="tab" data-p="ic">Interco (TRADE)</button>
     <button class="tab" data-p="ox">P&amp;L / OPEX</button><button class="tab" data-p="fc">13-week forecast</button>
     <button class="tab" data-p="inv">Inventory</button><button class="tab" data-p="tr">Trade commitments</button>
     <button class="tab active" data-p="sum">Summary</button><button id="xlsx" style="margin-left:auto;align-self:center" title="Download the tables on this tab as an Excel file">⬇ Export to Excel</button>
   </div>
-  <div class="pane" id="p-cash"></div><div class="pane" id="p-ar"></div><div class="pane" id="p-ap"></div><div class="pane" id="p-ox"></div><div class="pane" id="p-fc"></div>
+  <div class="pane" id="p-cash"></div><div class="pane" id="p-ar"></div><div class="pane" id="p-ap"></div><div class="pane" id="p-ic"></div><div class="pane" id="p-ox"></div><div class="pane" id="p-fc"></div>
   <div class="pane" id="p-inv"></div><div class="pane" id="p-tr"></div><div class="pane active" id="p-sum"></div>
 </div>
 <script>
@@ -95,7 +95,9 @@ const CONFIG = {
   filePath: "dashboard-snapshot.json",
   staleMinutes: 30
 };
+CONFIG.icGlCreditNegative = true;   // MY GL interco accounts: BC netChange is debit-positive, so a payable (credit) reads negative; set false if the snapshot already shows liabilities as positive
 CONFIG.agedInLcy = true;    // BC aged AR/AP API returns amounts in local currency (LCY); currency code only labels the row
+const INTERCO_RE = /saxon\s+renewable\s+energy\s+sdn\.?\s*bhd\.?\s*\(\s*(mt|trade)\s*\)/i;   // SAXON RENEWABLE ENERGY SDN BHD (MT) / (TRADE): intercompany, shown on the Interco (TRADE) tab, not in Receivables / Payables
 const ENTITIES = [{ key:'SG', ccy:'SGD', re:/pte|singapore|\bsg\b/i }, { key:'MY', ccy:'MYR', re:/sdn|bhd|malaysia|\bmy\b/i }];
 const BUCKETS = ['Not due','0–1 month','1–2 months','Over 2 months'], COLORS = ['var(--good)','var(--gold)','var(--warn)','var(--bad)'];
 
@@ -145,6 +147,14 @@ function cashOf(accts, base){
   });
   return { rows, total: rows.reduce((s, r) => s + r.balance, 0) };
 }
+const GL_IC_RE = /interco\s+trade\s+(receivables?|payables?)\s*-\s*saxon\s+renewables\s+pte\s+ltd/i;   // MY books: Interco Trade Receivables / Payables - Saxon Renewables Pte Ltd (trade only; non-trade (NT) is not reconciled here)
+function icGlOf(accts){
+  const o = { ar: null, ap: null };
+  (accts || []).filter(a => (a.accountType || 'Posting') === 'Posting').forEach(a => { const m = GL_IC_RE.exec(a.displayName || ''); if (!m) return;
+    const k = /^r/i.test(m[1]) ? 'ar' : 'ap', f = ['balance', 'totalBalance', 'netChange'].find(x => a[x] != null), v = f ? Number(a[f]) : 0;
+    o[k] = { no: a.number, name: a.displayName, amt: (o[k] ? o[k].amt : 0) + v }; });
+  return o;
+}
 function agingOf(raw, ap, base){
   let rows = (raw || []).map(r => { const b = [r.currentAmount, r.period1Amount, r.period2Amount, r.period3Amount].map(x => Number(x||0));
     return { no: String(r.customerNumber || r.vendorNumber || r.number || ''), name: r.name || r.displayName || '', total: Number(r.balanceDue ?? b.reduce((s,x)=>s+x,0)), b, cur: CONFIG.agedInLcy ? base : (r.currencyCode || base) }; }).filter(r => (Math.abs(r.total) > 0.005 || r.b.some(x => Math.abs(x) > 0.005)) && !(/^total$/i.test(r.name.trim()) && !r.no));
@@ -170,8 +180,10 @@ function build(snap){
   const map = pref('map', {});
   return snap.companies.map(c => {
     const g = ENTITIES.find(e => e.re.test(c.name + ' ' + (c.displayName || ''))), key = map[c.id] ?? (g ? g.key : ''), ec = (ENTITIES.find(e => e.key === key) || {}).ccy || '';
+    const rr0 = { ar: withDetail(agingOf(c.agedAR, false, ec).rows, c.openAR, false, ec), ap: withDetail(agingOf(c.agedAP, true, ec).rows, c.openAP, true, ec) }, isIc = r => INTERCO_RE.test(r.name || '');
+    const ic0 = { ar: rr0.ar.filter(isIc), ap: rr0.ap.filter(isIc) }, dueF = (c.apDue || []).filter(x => !INTERCO_RE.test(x.vendorName || x.vendor || x.name || ''));
     return { id: c.id, display: c.displayName || c.name, entity: key, ccy: (ENTITIES.find(e => e.key === key) || {}).ccy || '',
-      rc: cashOf(c.accounts || [], ec).rows, rr: { ar: withDetail(agingOf(c.agedAR, false, ec).rows, c.openAR, false, ec), ap: withDetail(agingOf(c.agedAP, true, ec).rows, c.openAP, true, ec) }, cash: { rows: [], total: 0 }, inv: invOf(c), ox: opexOf(opexRows(c)), hasOx: opexRows(c).length > 0, due: (c.apDue || []).length ? c.apDue : null,
+      rc: cashOf(c.accounts || [], ec).rows, rr: { ar: rr0.ar.filter(r => !isIc(r)), ap: rr0.ap.filter(r => !isIc(r)) }, ic0, icgl: icGlOf(c.accounts), cash: { rows: [], total: 0 }, inv: invOf(c), ox: opexOf(opexRows(c)), hasOx: opexRows(c).length > 0, due: (c.apDue || []).length ? dueF : null,
       pre: preRows(c).map(p => ({ party: p.vendor || p.name || '', ref: p.reference || '', note: p.description || '', date: p.date, amt: Number(p.amount || 0), src: 'BC' })), ar: null, ap: null };
   });
 }
@@ -214,7 +226,8 @@ function render(){
   const pct = (a, b) => b.v ? Math.round(a.v / b.v * 100) + '% of total' : '';
   const K = { cash: kpi('Available cash', cash, S.entity === 'ALL' ? 'All entities' : S.entity), ar: kpi('Receivables', ar, 'Outstanding'), arO: kpi('AR overdue', arO, pct(arO, ar), arO.v > 0 ? 'warn' : ''),
     ap: kpi('Payables', ap, 'Outstanding'), apO: kpi('AP overdue', apO, pct(apO, ap), apO.v > 0 ? 'bad' : ''), liq: kpi('Cash + AR − AP', { v: cash.v + ar.v - ap.v, miss: cash.miss || ar.miss || ap.miss }, 'Quick liquidity view'), _apO: apO.v };
-  cashPane(cash); agingPane('ar', 'Receivables', 'Customer'); agingPane('ap', 'Payables', 'Vendor'); extra(K, cash, ar, ap);
+  cashPane(cash); agingPane('ar', 'Receivables', 'Customer'); agingPane('ap', 'Payables', 'Vendor');
+  $('p-ic').innerHTML = '<div id="p-icar"></div><div id="p-icap"></div>'; agingPane('icar', 'Interco receivables', 'Company'); agingPane('icap', 'Interco payables', 'Company'); extra(K, cash, ar, ap);
 }
 function cashPane(total){
   let h = '<div class="card"><div class="head"><h2>Cash accounts</h2><span class="muted small">Account currency · ≈ ' + ccy() + '</span></div><table><thead><tr><th>Account</th><th>Ccy</th><th class="num">Balance</th><th class="num">≈ ' + ccy() + '</th></tr></thead><tbody>';
@@ -222,10 +235,11 @@ function cashPane(total){
   $('p-cash').innerHTML = h + '<tr class="sub"><td colspan="3">Total (' + ccy() + ')</td><td class="num">' + fmt(total.v, '', 2) + '</td></tr></tbody></table></div>';
 }
 function agingPane(k, name, party){
-  const b = [0,1,2,3].map(i => sum(c => c[k].b[i]));
+  const G = c => k === 'icar' ? c.ic.ar : k === 'icap' ? c.ic.ap : c[k];
+  const b = [0,1,2,3].map(i => sum(c => G(c).b[i]));
   if (b.some(x => x.miss)) { $('p-' + k).innerHTML = '<div class="card muted">Enter the FX rate to consolidate.</div>'; return; }
-  const T = b.reduce((s, x) => s + Math.max(x.v, 0), 0) || 1, rows = [], lab = k === 'ar' ? 'SO' : 'PO', today = new Date();
-  scope().forEach(c => c[k].rows.forEach(r => rows.push({ e: c.entity, n: r.name + (r.cur !== c.ccy ? ' · ' + r.cur : ''), t: conv(c, r.total), b: r.b.map(x => conv(c, x)), det: (r.det || []).map(d => ({ ...d, amt: conv(c, d.amt) })) })));
+  const T = b.reduce((s, x) => s + Math.max(x.v, 0), 0) || 1, rows = [], lab = /ar$/.test(k) ? 'SO' : 'PO', today = new Date();
+  scope().forEach(c => G(c).rows.forEach(r => rows.push({ e: c.entity, n: r.name + (r.cur !== c.ccy ? ' · ' + r.cur : ''), t: conv(c, r.total), b: r.b.map(x => conv(c, x)), det: (r.det || []).map(d => ({ ...d, amt: conv(c, d.amt) })) })));
   rows.sort((x, y) => y.t - x.t);
   const vrows = IN.nz ? rows : rows.filter(r => Math.abs(r.t) > 0.005), nzN = rows.length - rows.filter(r => Math.abs(r.t) > 0.005).length, hasDet = rows.some(r => r.det.length), N = x => '<td class="num">' + fmt(x, '', 0) + '</td>', E = n => '<td></td>'.repeat(n);
   const skey = r => (r.n + ' ' + r.det.map(d => [d.doc, d.ext, d.ord, d.terms].join(' ')).join(' ')).toLowerCase();
@@ -240,18 +254,18 @@ function agingPane(k, name, party){
     b.map((x, i) => '<span style="width:' + Math.max(x.v, 0)/T*100 + '%;background:' + COLORS[i] + '" title="' + BUCKETS[i] + '"></span>').join('') + '</div><div class="legend">' +
     b.map((x, i) => '<span><i style="background:' + COLORS[i] + '"></i>' + BUCKETS[i] + ' <b>' + fmt(x.v, ccy()) + '</b> (' + Math.round(Math.max(x.v, 0)/T*100) + '%)</span>').join('') + '</div>' +
     '<div class="tools" style="margin:12px 0 8px"><input id="aq-' + k + '" type="search" placeholder="Search ' + party.toLowerCase() + ', invoice or ' + lab + ' no.…" value="' + esc(AQ[k] || '') + '" style="width:300px">' + (hasDet ? '<button data-xall="1">Expand all</button><button data-xall="0">Collapse all</button><span class="muted small">Click a ' + party.toLowerCase() + ' to show its invoices</span>' : '') + (nzN ? '<label class="small muted" style="margin-left:auto"><input id="nz" type="checkbox" style="width:auto"' + (IN.nz ? ' checked' : '') + '> Show ' + nzN + ' net-zero ' + party.toLowerCase() + (nzN > 1 ? 's' : '') + ' with open items (offsetting balances)</label>' : '') + '</div>' + (hasDet ? ''
-      : '<div class="note">No invoice-level data in the snapshot yet, so only aged totals are shown. Add <b>open' + k.toUpperCase() + '</b> to each company in the snapshot (one row per open invoice: ' + party.toLowerCase() + ' name/number, invoice no., invoice date, due date, payment terms, ' + lab + ' no., ' + lab + ' date, remaining amount) to see the ' + lab + ' / invoice breakdown under each ' + party.toLowerCase() + '.</div>') +
+      : '<div class="note">No invoice-level data in the snapshot yet, so only aged totals are shown. Add <b>open' + k.replace(/^ic/, '').toUpperCase() + '</b> to each company in the snapshot (one row per open invoice: ' + party.toLowerCase() + ' name/number, invoice no., invoice date, due date, payment terms, ' + lab + ' no., ' + lab + ' date, remaining amount) to see the ' + lab + ' / invoice breakdown under each ' + party.toLowerCase() + '.</div>') +
     '<div style="overflow-x:auto"><table ' + (hasDet ? 'data-flat="1"' : '') + '><thead><tr><th>' + party + '</th><th>Entity</th>' + (hasDet ? '<th>' + lab + ' no.</th><th>Invoice no.</th><th>Invoice date</th><th>Payment terms</th><th>Due date</th><th class="num">Days overdue</th>' : '') + '<th class="num">Total</th>' + BUCKETS.map(x => '<th class="num">' + x + '</th>').join('') + '</tr></thead><tbody>' + body +
-    '</tbody></table></div><div class="muted small" style="margin-top:8px;">' + vrows.length + ' ' + party.toLowerCase() + (vrows.length === 1 ? '' : 's') + (nzN && !IN.nz ? ' (' + nzN + ' net-zero hidden)' : '') + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
+    '</tbody></table></div><div class="muted small" style="margin-top:8px;">' + vrows.length + ' ' + (vrows.length === 1 ? party.toLowerCase() : party === 'Company' ? 'companies' : party.toLowerCase() + 's') + (nzN && !IN.nz ? ' (' + nzN + ' net-zero hidden)' : '') + ', in ' + ccy() + ' · aged by due date in 1-month periods (BC Aged Accounts ' + name + ').</div></div>';
   applyAq(k);
 }
 const EXP = new Set(), AQ = {};
 function applyAq(k){ const pane = $('p-' + k), q = (AQ[k] || '').trim().toLowerCase(); if (!pane) return; const hide = new Set();
   pane.querySelectorAll('tr.grp').forEach(r => { const m = !q || (r.dataset.s || '').includes(q); r.style.display = m ? '' : 'none'; if (!m && r.dataset.tg) hide.add(r.dataset.tg); });
   pane.querySelectorAll('tr.gd').forEach(r => r.style.display = hide.has(r.dataset.gk) ? 'none' : ''); }
-document.addEventListener('input', e => { const m = /^aq-(ar|ap)$/.exec(e.target.id || ''); if (m) { AQ[m[1]] = e.target.value; applyAq(m[1]); } });
+document.addEventListener('input', e => { const m = /^aq-(ar|ap|icar|icap)$/.exec(e.target.id || ''); if (m) { AQ[m[1]] = e.target.value; applyAq(m[1]); } });
 document.addEventListener('change', e => { if (e.target.id === 'nz') { IN.nz = e.target.checked; setPref('nz', IN.nz); render(); } });
-document.addEventListener('click', e => { const x = e.target.closest && e.target.closest('[data-xall]'), tg = e.target.closest && e.target.closest('tr[data-tg]'), pane = e.target.closest && e.target.closest('.pane');
+document.addEventListener('click', e => { const x = e.target.closest && e.target.closest('[data-xall]'), tg = e.target.closest && e.target.closest('tr[data-tg]'), pane = e.target.closest && e.target.closest('[id^="p-"]');
   const set = (key, on) => { on ? EXP.add(key) : EXP.delete(key); pane.querySelectorAll('tr.gd').forEach(r => { if (r.dataset.gk === key) r.classList.toggle('hide', !on); }); pane.querySelectorAll('tr[data-tg]').forEach(r => { if (r.dataset.tg === key) r.querySelector('.arw').textContent = on ? '▾' : '▸'; }); };
   if (x && pane) pane.querySelectorAll('tr[data-tg]').forEach(r => set(r.dataset.tg, x.dataset.xall === '1'));
   else if (tg && pane) set(tg.dataset.tg, !EXP.has(tg.dataset.tg)); });
@@ -265,6 +279,7 @@ function applyFx(){ S.cos.forEach(c => { if (!c.entity) return; const miss = new
   const rows = c.rc.map(a => { const v = bc(a.cur, a.balance); add('cash', a.cur, a.balance, v); return { ...a, base: v }; });
   c.cash = { rows, total: rows.reduce((s, a) => s + a.base, 0) };
   ['ar', 'ap'].forEach(k => { c[k] = agg(c.rr[k].map(x => { const o = { ...x, total: bc(x.cur, x.total), b: x.b.map(v => bc(x.cur, v)) }; add(k, x.cur, x.total, o.total); return o; })); });
+  c.ic = {}; ['ar', 'ap'].forEach(k => { c.ic[k] = agg(c.ic0[k].map(x => ({ ...x, total: bc(x.cur, x.total), b: x.b.map(v => bc(x.cur, v)) }))); });
   c.cur = cu; c.miss = [...miss]; }); }
 function curCard(k, title){
   const b = ccy(), g = {}; scope().forEach(c => Object.entries(c.cur[k]).forEach(([u, x]) => { const a = g[u] || (g[u] = { amt: 0, base: 0 }); a.amt += x.amt; a.base += x.base; }));
@@ -276,7 +291,7 @@ function curCard(k, title){
 /* ============ PHASE 2: OPEX · 13-week forecast · Inventory · Trade commitments · Summary ============ */
 CONFIG.spreadWeeks = 8;   // used only when the snapshot has no apDue list: current (not yet due) AP is spread over this many weeks
 const PAL = ['#4a8fc7','#2f9e68','#c79a42','#d9534f','#8e6bbf','#3bb3b3','#c76b9b','#7f8c9a'];
-const IN = { adj: pref('adj', []), fix: pref('fix', {}), fc: pref('fc', []), tr: pref('tr', []), tmin: pref('tmin', 100000), fxr: pref('fxr', CONFIG.demo ? DEMO_RATES : {}) };   // finance manual inputs (this browser)
+const IN = { adj: pref('adj', []), fix: pref('fix', {}), fc: pref('fc', []), tr: pref('tr', []), tmin: pref('tmin', 100000), ictol: pref('ictol', 0.5), fxr: pref('fxr', CONFIG.demo ? DEMO_RATES : {}) };   // finance manual inputs (this browser)
 const sv = k => setPref(k, IN[k]);
 const cv = (f, v) => conv({ ccy: f }, v), eccy = k => ENTITIES.find(e => e.key === k).ccy, inScope = k => S.entity === 'ALL' || S.entity === k;
 const needFx = () => S.entity === 'ALL' && new Set(scope().map(c => c.ccy)).size > 1 && !Number($('fx').value);
@@ -387,9 +402,47 @@ function line(vals, labs){
 /* ---- panes ---- */
 const fxMsg = '<div class="card muted">Enter the FX rate to consolidate.</div>';
 const dlabel = d => d.toLocaleDateString('en-SG', { day: 'numeric', month: 'short' });
+function icRecon(){
+  const ent = S.entity === 'ALL' ? 'SG' : S.entity, to = ccy(), other = to === 'SGD' ? 'MYR' : 'SGD', rate = IN.fxr[ent + ':' + other] || 0, sgs = S.cos.filter(c => c.entity === 'SG'), mys = S.cos.filter(c => c.entity === 'MY');
+  const sgAr = sgs.reduce((t, c) => t + c.ic.ar.total, 0), sgAp = sgs.reduce((t, c) => t + c.ic.ap.total, 0), sg = sgs.length > 0;
+  const gl = k => { const a = mys.map(c => c.icgl[k]).filter(Boolean); return a.length ? { amt: a.reduce((t, x) => t + x.amt, 0), accts: a.map(x => x.no + ' ' + x.name) } : null; };
+  const glAr = gl('ar'), glAp = gl('ap'), myRec = glAr ? glAr.amt : null, myPay = glAp ? (CONFIG.icGlCreditNegative ? -glAp.amt : glAp.amt) : null;
+  const cv = (v, from) => v == null ? null : from === to ? v : rate ? v * rate : null;   // rate = how many display-currency units 1 unit of the other currency is worth (SG tab: 1 MYR = x SGD; MY tab: 1 SGD = x MYR)
+  const mk = (label, a, b) => { const A = cv(a, 'SGD'), B = cv(b, 'MYR'); let d = null, st;
+    if (a == null || b == null) st = 'no'; else if (A == null || B == null) st = 'fx'; else { d = A - B; const tol = Math.max(1, Math.max(Math.abs(A), Math.abs(B)) * (IN.ictol / 100)); st = Math.abs(d) <= tol ? 'ok' : 'bad'; }
+    return { label, a, b, d, st }; };
+  const R = [mk('SG receivable from MT / TRADE  vs  MY payable to SG', sg ? sgAr : null, myPay),
+             mk('SG payable to MT / TRADE  vs  MY receivable from SG', sg ? sgAp : null, myRec),
+             mk('Net: SG due from MY (R − P)  vs  MY due to SG (P − R)', sg && myPay != null && myRec != null ? sgAr - sgAp : null, myPay != null && myRec != null ? myPay - myRec : null)];
+  return { R, ent, to, other, rate, glAr, glAp, bad: R.filter(r => r.st === 'bad').length, fxMiss: R.some(r => r.st === 'fx'), none: R.every(r => r.st === 'no') };
+}
+const ST = { ok: ['Matched', 'var(--good)'], bad: ['Mismatch', 'var(--bad)'], fx: ['Enter FX rate', 'var(--warn)'], no: ['No data on one side', 'var(--warn)'] };
+function icReconCard(rc){
+  const rows = rc.R.map(r => '<tr><td>' + esc(r.label) + '</td><td class="num">' + (r.a == null ? '—' : fmt(r.a, '', 2)) + '</td><td class="num">' + (r.b == null ? '—' : fmt(r.b, '', 2)) + '</td><td class="num"' + (r.st === 'bad' ? ' style="color:var(--bad);font-weight:700"' : '') + '>' + (r.d == null ? '—' : fmt(r.d, '', 2)) + '</td><td style="color:' + ST[r.st][1] + ';font-weight:700">' + ST[r.st][0] + '</td></tr>').join('');
+  const fx = '<span class="small muted">1 ' + rc.other + ' =</span> <input type="number" step="0.0001" min="0" data-fxr="' + rc.ent + ':' + rc.other + '" value="' + (rc.rate || '') + '" style="width:90px"> <span class="small muted">' + rc.to + '</span>';
+  const src = (a, n) => a ? a.accts.map(esc).join('; ') : '<span style="color:var(--warn)">' + n + ' account not found in the MY chart</span>';
+  return card('Interco reconciliation (trade)', '<div class="tools" style="margin-bottom:8px">' + fx + '<label class="small muted" style="margin-left:auto">Tolerance <input id="ictol" type="number" step="0.1" min="0" value="' + IN.ictol + '" style="width:60px"> %</label></div>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Check</th><th class="num">SG books (SGD)</th><th class="num">MY books (MYR)</th><th class="num">Difference (' + rc.to + ')</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="muted small" style="margin-top:8px">SG side = aging balances of SAXON RENEWABLE ENERGY SDN BHD (MT) and (TRADE) combined (trade related; MT = TRADE). MY side = GL: ' + src(rc.glAp, 'Interco Trade Payables - Saxon Renewables Pte Ltd') + ' (payable) and ' + src(rc.glAr, 'Interco Trade Receivables - Saxon Renewables Pte Ltd') + ' (receivable), using the GL balance / net change in the snapshot' + (CONFIG.icGlCreditNegative ? ' with credits read as negative' : '') + '. Difference = SG − MY, with the MY or SG amount converted at the rate above. Within tolerance counts as matched (FX / timing). Non-trade (NT) balances are not included.</div>', 'SG sub-ledger vs MY GL · in ' + rc.to);
+}
+function icHead(){
+  const icAr = sum(c => c.ic.ar.total), icAp = sum(c => c.ic.ap.total), miss = icAr.miss || icAp.miss, c0 = ccy();
+  const rc = icRecon(), rs = rc.none ? ['No MY GL data', 'warn'] : rc.bad ? [rc.bad + ' mismatch' + (rc.bad > 1 ? 'es' : ''), 'bad'] : rc.fxMiss ? ['Needs FX rate', 'warn'] : ['All matched', ''];
+  let h = row(kpi('Interco receivable', icAr, 'Due from MT / TRADE'), kpi('Interco payable', icAp, 'Due to MT / TRADE'), kpi('Net interco', { v: icAr.v - icAp.v, miss }, 'Receivable − payable'), kv('Interco reconciliation', rs[0], 'SG vs MY books', rs[1])) + icReconCard(rc);
+  h += '<div class="note">SAXON RENEWABLE ENERGY SDN BHD (MT) and (TRADE) are intercompany. They are excluded from the Receivables and Payables tabs and from the cash / liquidity figures, and shown here instead.</div>';
+  if (S.entity !== 'SG' && scope().every(x => !x.ic.ar.rows.length && !x.ic.ap.rows.length)) h += '<div class="note">MT / TRADE are customers / vendors in the SG books. Switch to the SG entity to see their aging detail; the reconciliation above covers both entities.</div>';
+  if (miss) return h;
+  const g = {}; scope().forEach(c => ['ar', 'ap'].forEach(k => c.ic[k].rows.forEach(r => { const o = g[c.entity + '|' + r.name] || (g[c.entity + '|' + r.name] = { e: c.entity, n: r.name, ar: 0, ap: 0 }); o[k] += conv(c, r.total) || 0; })));
+  const L = Object.values(g).sort((x, y) => x.n.localeCompare(y.n) || x.e.localeCompare(y.e));
+  if (!L.length) return h + '<div class="card muted">No interco (MT / TRADE) balances found in the snapshot.</div>';
+  return h + card('Interco summary', '<table><thead><tr><th>Company</th><th>Entity</th><th class="num">Receivable</th><th class="num">Payable</th><th class="num">Net (R − P)</th></tr></thead><tbody>' +
+    L.map(x => '<tr><td>' + esc(x.n) + '</td><td>' + x.e + '</td><td class="num">' + fmt(x.ar, '', 0) + '</td><td class="num">' + fmt(x.ap, '', 0) + '</td><td class="num">' + fmt(x.ar - x.ap, '', 0) + '</td></tr>').join('') +
+    '<tr class="sub"><td colspan="2">Total (' + c0 + ')</td><td class="num">' + fmt(icAr.v, '', 0) + '</td><td class="num">' + fmt(icAp.v, '', 0) + '</td><td class="num">' + fmt(icAr.v - icAp.v, '', 0) + '</td></tr></tbody></table>', 'In ' + c0);
+}
 function extra(K, cash, ar, ap){
   const P = id => $('p-' + id); ents = '<option>' + S.entity + '</option>';
   P('cash').innerHTML = row(K.cash) + curCard('cash', 'Cash by currency') + P('cash').innerHTML; P('ar').innerHTML = row(K.ar, K.arO) + (CONFIG.agedInLcy ? '' : curCard('ar', 'Receivables by currency')) + P('ar').innerHTML; P('ap').innerHTML = row(K.ap, K.apO) + (CONFIG.agedInLcy ? '' : curCard('ap', 'Payables by currency')) + P('ap').innerHTML;
+  P('ic').innerHTML = icHead() + P('ic').innerHTML;
   if (needFx()) { ['ox', 'fc', 'inv', 'tr', 'sum'].forEach(i => P(i).innerHTML = fxMsg); return; }
   const c = ccy(), ox = calcOx(), fc = calcFc(), inv = sum(x => x.inv.total).v, items = tradeItems(), big = items.filter(x => x.r >= IN.tmin), bt = big.reduce((s, x) => s + x.r, 0), n = ox.ms.length - 1;
   const avg = ox.tot.reduce((a, b) => a + b, 0) / ox.tot.length, end = fc.W[12];
@@ -464,7 +517,7 @@ const mlist = (k, f, hint) => { const a = IN[k].filter(x => inScope(x.ent)); ret
 
 document.addEventListener('submit', e => { const f = e.target.dataset.f; if (!f) return; e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); o.amt = +o.amt; o.id = Date.now(); IN[f].push(o); sv(f); render(); });
 document.addEventListener('click', e => { const d = e.target.dataset.del; if (!d) return; const [k, id] = d.split(':'); IN[k] = IN[k].filter(x => String(x.id) !== id); sv(k); render(); });
-document.addEventListener('change', e => { const t = e.target; if (t.dataset.fix) { IN.fix[t.dataset.fix] = t.checked; sv('fix'); render(); } if (t.dataset.fxr) { IN.fxr[t.dataset.fxr] = +t.value || 0; sv('fxr'); render(); } if (t.id === 'ig') { IN.ig = t.value; setPref('ig', t.value); render(); } if (t.id === 'tmin') { IN.tmin = +t.value || 0; sv('tmin'); render(); } });
+document.addEventListener('change', e => { const t = e.target; if (t.dataset.fix) { IN.fix[t.dataset.fix] = t.checked; sv('fix'); render(); } if (t.dataset.fxr) { IN.fxr[t.dataset.fxr] = +t.value || 0; sv('fxr'); render(); } if (t.id === 'ig') { IN.ig = t.value; setPref('ig', t.value); render(); } if (t.id === 'ictol') { IN.ictol = Math.max(0, +t.value || 0); setPref('ictol', IN.ictol); render(); } if (t.id === 'tmin') { IN.tmin = +t.value || 0; sv('tmin'); render(); } });
 
 
 /* ---- Export to Excel (.xlsx, no external library): exports every table, KPI and chart list on the active tab ---- */
